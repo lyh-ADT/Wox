@@ -11,7 +11,7 @@ help:
 	@echo "  make format     - Run formatting"
 
 clean:
-	rm -rf python-host.pyz python-host/
+	python -c "import shutil; import pathlib; pathlib.Path('python-host.pyz').unlink(missing_ok=True); shutil.rmtree('python-host/', ignore_errors=True)"
 
 install:
 	uv cache clean

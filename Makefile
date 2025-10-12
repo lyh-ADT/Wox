@@ -53,7 +53,7 @@ ifeq ($(PLATFORM),windows)
 endif
 
 clean:
-	rm -rf $(RELEASE_DIR)
+	python -c "import shutil; shutil.rmtree('$(RELEASE_DIR)', ignore_errors=True)"
 
 plugins:
 	cd ci && go run plugin.go

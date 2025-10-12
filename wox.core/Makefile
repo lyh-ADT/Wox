@@ -27,7 +27,8 @@ RELEASE_DIR := ../release
 
 # Extract version string from updater/version.go
 # Expected format: const CURRENT_VERSION = "x.y.z[-prerelease]"
-VERSION := $(shell sed -n 's/^const CURRENT_VERSION = "\(.*\)"/\1/p' updater/version.go)
+VERSION := $(shell python -c "import re; print(re.search('const CURRENT_VERSION = \"(.*)\"', open('updater/version.go', 'rt').read()).group(1))")
+
 
 help:
 	@echo "Available commands:"
@@ -36,8 +37,9 @@ help:
 	@echo "  make woxmr-build   - Build and install WoxMR.bundle for current platform ($(PLATFORM))"
 
 clean:
-	rm -rf $(RELEASE_DIR)
-	rm -f resource_windows.syso rsrc_windows.syso
+	python -c "import shutil; shutil.rmtree('$(RELEASE_DIR)', ignore_errors=True)"
+	python -c "import pathlib; pathlib.Path('resource_windows.syso').unlink(missing_ok=True);"
+	python -c "import pathlib; pathlib.Path('rsrc_windows.syso').unlink(missing_ok=True);"
 
 build: clean
 	$(MAKE) woxmr-build

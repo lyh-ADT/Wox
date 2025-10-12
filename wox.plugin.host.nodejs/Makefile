@@ -16,6 +16,6 @@ install: clean
 
 build: install
 	pnpm run build
-	mkdir -p $(HOSTS_DIR)
-	cp dist/index.js $(HOSTS_DIR)/node-host.js
-	rm -rf dist/
+	python -c "import os; os.makedirs('$(HOSTS_DIR)', exist_ok=True)"
+	python -c "import shutil; shutil.copy('dist/index.js', '$(HOSTS_DIR)/node-host.js')"
+	python -c "import shutil; shutil.rmtree('dist/')"

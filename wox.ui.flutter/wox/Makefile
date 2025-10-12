@@ -22,13 +22,13 @@ help:
 
 clean:
 	flutter clean
-	rm -rf $(UI_FLUTTER_DIR)
+	python -c "import shutil; shutil.rmtree('$(UI_FLUTTER_DIR)', ignore_errors=True)"
 
 build: clean
 	flutter build $(FLUTTER_TARGET)
-	mkdir -p $(UI_FLUTTER_DIR)
+	python -c "import os; os.makedirs('$(UI_FLUTTER_DIR)', exist_ok=True)"
 ifeq ($(FLUTTER_TARGET),windows)
-	cp -r build/$(FLUTTER_TARGET)/x64/runner/Release $(UI_FLUTTER_DIR)/wox
+	python -c "import shutil; shutil.copytree('build/$(FLUTTER_TARGET)/x64/runner/Release', '$(UI_FLUTTER_DIR)/wox')"
 endif
 ifeq ($(FLUTTER_TARGET),linux)
 	cp -r build/$(FLUTTER_TARGET)/x64/release/bundle $(UI_FLUTTER_DIR)/wox
