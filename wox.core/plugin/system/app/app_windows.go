@@ -146,7 +146,7 @@ func (a *WindowsRetriever) parseShortcut(ctx context.Context, appPath string) (a
 
 	a.api.Log(ctx, plugin.LogLevelInfo, fmt.Sprintf("Resolved shortcut %s -> %s", appPath, targetPath))
 
-	if targetPath == "" || !strings.HasSuffix(strings.ToLower(targetPath), ".exe") {
+	if targetPath == "" || (!strings.HasSuffix(strings.ToLower(targetPath), ".exe") && !strings.HasSuffix(strings.ToLower(targetPath), ".bat")) {
 		return appInfo{}, errors.New("no target path found or not an exe file")
 	}
 
