@@ -7,15 +7,24 @@ on:
 
 jobs:
   test:
-    runs-on: [ self-hosted, macOS, ARM64 ]
+    runs-on: ubuntu-22.04
     steps:
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Set up golang, nodejs, uv, GTK3, keybinder-3.0
+        run: sudo add-apt-repository ppa:longsleep/golang-backports && sudo apt update && sudo apt install -y golang-go nodejs npm libgtk-3-dev build-essential 
+         && sudo apt-get update 
+         && sudo apt-get install -y keybinder-3.0  xcb libxcb-xkb-dev x11-xkb-utils libx11-xcb-dev libxkbcommon-x11-dev libxtst-dev libayatana-appindicator3-dev 
+         && sudo apt-get install -y xvfb tigervnc-standalone-server
+         && npm install -g pnpm && curl -LsSf https://astral.sh/uv/install.sh | sh
       - uses: actions/checkout@v3
-      - name: Test
-        run: make test
+      - name: run
+        run: make test-xvfb
 
   build:
     name: Build ${{ matrix.os }} ${{ matrix.arch }}
-    needs: test
     strategy:
       matrix:
         include:
@@ -35,7 +44,7 @@ jobs:
           #   needs_keychain: true
           - os: Windows
             arch: AMD64
-            runner: [ self-hosted, Windows ]
+            runner: windows-latest
             asset_path: ./release/wox-windows-amd64.exe
             asset_name: wox-windows-amd64.exe
             content_type: application/x-msdownload
@@ -47,6 +56,14 @@ jobs:
           #   content_type: application/x-msdownload
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Set up uv
+        run: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+      - name: Set up pnpm
+        run: npm install -g pnpm
       - uses: actions/checkout@v3
       - name: Build
         run: make build

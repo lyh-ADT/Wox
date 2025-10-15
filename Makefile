@@ -68,6 +68,10 @@ dev: _check_deps
 test: dev
 	$(MAKE) test-isolated
 
+# Test with virtual gui
+test-xvfb: dev
+	cd wox.core && WOX_TEST_DATA_DIR=/tmp/wox-test-isolated WOX_TEST_CLEANUP=true xvfb-run go test ./test -v
+
 # Test with custom environment
 test-isolated:
 	cd wox.core && WOX_TEST_DATA_DIR=/tmp/wox-test-isolated WOX_TEST_CLEANUP=true go test ./test -v
