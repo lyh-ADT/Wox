@@ -252,6 +252,10 @@ func (m *TimeModule) Convert(ctx context.Context, result core.Result, toUnit cor
 func (m *TimeModule) handleTimeInLocation(ctx context.Context, matches []string) (core.Result, error) {
 	location := strings.ToLower(strings.TrimSpace(matches[1]))
 
+	if strings.ToUpper(location) == "UTC" {
+		location = "UTC"
+	}
+
 	// Try to find the timezone alias
 	if tzName, ok := timeZoneAliases[location]; ok {
 		location = tzName
