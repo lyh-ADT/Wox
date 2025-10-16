@@ -2,6 +2,7 @@ import asyncio
 import sys
 import uuid
 import os
+import platform
 
 from . import logger
 from .host import start_websocket
@@ -21,11 +22,30 @@ logger.update_log_directory(log_directory)
 
 def check_wox_process() -> bool:
     """Check if Wox process is still alive"""
-    try:
-        os.kill(wox_pid, 0)
+    if platform.system() != "Windows":
+        try:
+            os.kill(wox_pid, 0)
+            return True
+        except OSError:
+            return False
+
+    # Windows-specific process checking since os.kill(wox_pid, 0) doesn't work on Windows
+    import ctypes  # type: ignore[import-not-found]
+    import ctypes.wintypes  # type: ignore[import-not-found]
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_ACCESS_DENIED = 5
+
+    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, ctypes.wintypes.DWORD(wox_pid))  # type: ignore[attr-defined]
+    if handle:
+        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
         return True
-    except OSError:
-        return False
+
+    error = ctypes.windll.kernel32.GetLastError()  # type: ignore[attr-defined]
+    if error == ERROR_ACCESS_DENIED:
+        return True
+
+    return False
 
 
 async def monitor_wox_process() -> None:
