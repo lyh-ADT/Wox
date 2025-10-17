@@ -74,7 +74,7 @@ func TestCalculatorTrigonometric(t *testing.T) {
 		{
 			Name:           "Tangent",
 			Query:          "tan(pi/4)",
-			ExpectedTitle:  "0.9999999999999998",
+			ExpectedTitle:  "1",
 			ExpectedAction: "Copy result",
 		},
 	}
