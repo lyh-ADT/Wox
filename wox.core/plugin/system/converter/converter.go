@@ -266,13 +266,11 @@ func (c *Converter) calculateExpression(ctx context.Context, results []core.Resu
 	result.DisplayValue = fmt.Sprintf("%s %s", result.RawValue.String(), targetUnit.Name)
 
 	// Convert the result to the target unit
-	if targetUnit.Name != result.Unit.Name {
-		for _, module := range c.registry.Modules() {
-			if convertedResult, err := module.Convert(ctx, result, targetUnit); err == nil {
-				c.api.Log(ctx, plugin.LogLevelDebug, fmt.Sprintf("Converted result with module %s => displayValue=%s, rawValue=%s, unit=%s", module.Name(), convertedResult.DisplayValue, convertedResult.RawValue.String(), convertedResult.Unit.Name))
-				result = convertedResult
-				break
-			}
+	for _, module := range c.registry.Modules() {
+		if convertedResult, err := module.Convert(ctx, result, targetUnit); err == nil {
+			c.api.Log(ctx, plugin.LogLevelDebug, fmt.Sprintf("Converted result with module %s => displayValue=%s, rawValue=%s, unit=%s", module.Name(), convertedResult.DisplayValue, convertedResult.RawValue.String(), convertedResult.Unit.Name))
+			result = convertedResult
+			break
 		}
 	}
 
