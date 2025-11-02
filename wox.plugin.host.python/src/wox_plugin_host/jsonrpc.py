@@ -314,6 +314,11 @@ async def unload_plugin(ctx: Context, request: Dict[str, Any]) -> None:
     try:
         # Remove plugin from instances
         del plugin_instances[plugin_id]
+        
+        # remove plugin module from cache, allow dev plugin actually reload
+        # TODO: modules imported by this plugin will not reload, may cause problem
+        plugin_module = plugin_instance.plugin.__module__
+        sys.modules.pop(plugin_module, None)
 
         # Remove plugin directory from Python path
         plugin_dir = path.dirname(plugin_instance.module_path)
