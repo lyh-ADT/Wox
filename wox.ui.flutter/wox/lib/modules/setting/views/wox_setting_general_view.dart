@@ -6,11 +6,13 @@ import 'package:wox/api/wox_api.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_table_view.dart';
 import 'package:wox/components/wox_hotkey_recorder_view.dart';
 import 'package:wox/components/wox_switch.dart';
+import 'package:wox/components/wox_dropdown_button.dart';
 import 'package:wox/controllers/wox_launcher_controller.dart';
 import 'package:wox/entity/setting/wox_plugin_setting_table.dart';
 import 'package:wox/entity/wox_hotkey.dart';
 import 'package:wox/entity/wox_lang.dart';
-import 'package:wox/enums/wox_query_mode_enum.dart';
+import 'package:wox/enums/wox_launch_mode_enum.dart';
+import 'package:wox/enums/wox_start_page_enum.dart';
 import 'package:wox/modules/setting/views/wox_setting_base.dart';
 import 'package:wox/utils/colors.dart';
 
@@ -117,37 +119,56 @@ class WoxSettingGeneralView extends WoxSettingBaseView {
           }),
         ),
         formField(
-          label: controller.tr("ui_query_mode"),
-          tips: controller.tr("ui_query_mode_tips"),
+          label: controller.tr("ui_launch_mode"),
+          tips: controller.tr("ui_launch_mode_tips"),
           child: Obx(() {
-            return SizedBox(
-              width: 250,
-              child: DropdownButton<String>(
-                items: [
-                  DropdownMenuItem(
-                    value: WoxQueryModeEnum.WOX_QUERY_MODE_PRESERVE.code,
-                    child: Text(controller.tr("ui_query_mode_preserve")),
-                  ),
-                  DropdownMenuItem(
-                    value: WoxQueryModeEnum.WOX_QUERY_MODE_EMPTY.code,
-                    child: Text(controller.tr("ui_query_mode_empty")),
-                  ),
-                  DropdownMenuItem(
-                    value: WoxQueryModeEnum.WOX_QUERY_MODE_MRU.code,
-                    child: Text(controller.tr("ui_query_mode_mru")),
-                  ),
-                ],
-                value: controller.woxSetting.value.queryMode,
-                onChanged: (v) {
-                  if (v != null) {
-                    controller.updateConfig("QueryMode", v);
-                  }
-                },
-                isExpanded: true,
-                style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-                dropdownColor: getThemeActiveBackgroundColor().withOpacity(0.95),
-                iconEnabledColor: getThemeTextColor(),
-              ),
+            return WoxDropdownButton<String>(
+              items: [
+                WoxDropdownItem(
+                  value: WoxLaunchModeEnum.WOX_LAUNCH_MODE_FRESH.code,
+                  label: controller.tr("ui_launch_mode_fresh"),
+                  tooltip: controller.tr("ui_launch_mode_fresh_tips"),
+                ),
+                WoxDropdownItem(
+                  value: WoxLaunchModeEnum.WOX_LAUNCH_MODE_CONTINUE.code,
+                  label: controller.tr("ui_launch_mode_continue"),
+                  tooltip: controller.tr("ui_launch_mode_continue_tips"),
+                ),
+              ],
+              value: controller.woxSetting.value.launchMode,
+              onChanged: (v) {
+                if (v != null) {
+                  controller.updateConfig("LaunchMode", v);
+                }
+              },
+              isExpanded: true,
+            );
+          }),
+        ),
+        formField(
+          label: controller.tr("ui_start_page"),
+          tips: controller.tr("ui_start_page_tips"),
+          child: Obx(() {
+            return WoxDropdownButton<String>(
+              items: [
+                WoxDropdownItem(
+                  value: WoxStartPageEnum.WOX_START_PAGE_BLANK.code,
+                  label: controller.tr("ui_start_page_blank"),
+                  tooltip: controller.tr("ui_start_page_blank_tips"),
+                ),
+                WoxDropdownItem(
+                  value: WoxStartPageEnum.WOX_START_PAGE_MRU.code,
+                  label: controller.tr("ui_start_page_mru"),
+                  tooltip: controller.tr("ui_start_page_mru_tips"),
+                ),
+              ],
+              value: controller.woxSetting.value.startPage,
+              onChanged: (v) {
+                if (v != null) {
+                  controller.updateConfig("StartPage", v);
+                }
+              },
+              isExpanded: true,
             );
           }),
         ),
@@ -159,11 +180,11 @@ class WoxSettingGeneralView extends WoxSettingBaseView {
                 if (snapshot.connectionState == ConnectionState.done) {
                   final languages = snapshot.data as List<WoxLang>;
                   return Obx(() {
-                    return DropdownButton<String>(
+                    return WoxDropdownButton<String>(
                       items: languages.map((e) {
-                        return DropdownMenuItem(
+                        return WoxDropdownItem(
                           value: e.code,
-                          child: Text(e.name),
+                          label: e.name,
                         );
                       }).toList(),
                       value: controller.woxSetting.value.langCode,
@@ -173,9 +194,6 @@ class WoxSettingGeneralView extends WoxSettingBaseView {
                         }
                       },
                       isExpanded: true,
-                      style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-                      dropdownColor: getThemeActiveBackgroundColor().withOpacity(0.95),
-                      iconEnabledColor: getThemeTextColor(),
                     );
                   });
                 }
@@ -184,6 +202,7 @@ class WoxSettingGeneralView extends WoxSettingBaseView {
         ),
         formField(
           label: controller.tr("ui_query_hotkeys"),
+          tips: controller.tr("ui_query_hotkeys_tips"),
           child: Obx(() {
             return WoxSettingPluginTable(
               value: json.encode(controller.woxSetting.value.queryHotkeys),
@@ -215,7 +234,7 @@ class WoxSettingGeneralView extends WoxSettingBaseView {
                     "Key": "IsSilentExecution",
                     "Label": "i18n:ui_query_hotkeys_silent",
                     "Tooltip": "i18n:ui_query_hotkeys_silent_tooltip",
-                    "Width": 60,
+                    "Width": 40,
                     "Type": "checkbox",
                   }
                 ],
@@ -229,6 +248,7 @@ class WoxSettingGeneralView extends WoxSettingBaseView {
         ),
         formField(
           label: controller.tr("ui_query_shortcuts"),
+          tips: controller.tr("ui_query_shortcuts_tips"),
           child: Obx(() {
             return WoxSettingPluginTable(
               value: json.encode(controller.woxSetting.value.queryShortcuts),

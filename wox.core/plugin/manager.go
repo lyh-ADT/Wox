@@ -30,7 +30,6 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
-	"github.com/jinzhu/copier"
 	"github.com/samber/lo"
 	"github.com/wissance/stringFormatter"
 )
@@ -38,6 +37,11 @@ import (
 var managerInstance *Manager
 var managerOnce sync.Once
 var logger *util.Log
+
+const (
+	// ContextData value for favorite tail
+	favoriteTailContextData = "system:favorite"
+)
 
 type debounceTimer struct {
 	timer  *time.Timer
@@ -430,6 +434,9 @@ func (m *Manager) ParseMetadata(ctx context.Context, pluginDirectory string) (Me
 }
 
 // ParseScriptMetadata parses metadata from script plugin file comments
+// Supports two formats:
+// 1. JSON block format (preferred): # { ... } with complete plugin.json structure
+// 2. Legacy @wox.xxx format: individual @wox.id, @wox.name, etc. annotations
 func (m *Manager) ParseScriptMetadata(ctx context.Context, scriptPath string) (Metadata, error) {
 	content, err := os.ReadFile(scriptPath)
 	if err != nil {
@@ -437,78 +444,87 @@ func (m *Manager) ParseScriptMetadata(ctx context.Context, scriptPath string) (M
 	}
 
 	lines := strings.Split(string(content), "\n")
-	metadata := Metadata{
-		Runtime: string(PLUGIN_RUNTIME_SCRIPT),
-		Entry:   filepath.Base(scriptPath),
-		Version: "1.0.0", // Default version
-	}
 
-	// Parse metadata from comments
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	// Parse JSON block format
+	var jsonBuilder strings.Builder
+	inJsonBlock := false
+	jsonStartLine := -1
+	braceDepth := 0
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
 
 		// Stop parsing when we reach non-comment lines (except shebang)
-		if !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "//") && !strings.HasPrefix(line, "#!/") {
-			if line != "" {
+		if !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "#!/") {
+			if trimmed != "" {
 				break
 			}
 			continue
 		}
 
 		// Remove comment markers
-		line = strings.TrimPrefix(line, "#")
-		line = strings.TrimPrefix(line, "//")
-		line = strings.TrimPrefix(line, "#!/usr/bin/env")
-		line = strings.TrimPrefix(line, "#!/bin/")
-		line = strings.TrimSpace(line)
+		cleaned := strings.TrimPrefix(trimmed, "#")
+		cleaned = strings.TrimPrefix(cleaned, "//")
+		cleaned = strings.TrimSpace(cleaned)
 
-		// Parse @wox.xxx metadata
-		if strings.HasPrefix(line, "@wox.") {
-			parts := strings.SplitN(line, " ", 2)
-			if len(parts) != 2 {
-				continue
+		// Check for JSON block start
+		if !inJsonBlock && cleaned == "{" {
+			inJsonBlock = true
+			jsonStartLine = i
+			braceDepth = 1
+			jsonBuilder.WriteString(cleaned)
+			continue
+		}
+
+		// Collect JSON content
+		if inJsonBlock {
+			jsonBuilder.WriteString("\n")
+			jsonBuilder.WriteString(cleaned)
+
+			// Track brace depth
+			for _, ch := range cleaned {
+				if ch == '{' {
+					braceDepth++
+				} else if ch == '}' {
+					braceDepth--
+				}
 			}
 
-			key := strings.TrimPrefix(parts[0], "@wox.")
-			value := strings.TrimSpace(parts[1])
-
-			switch key {
-			case "id":
-				metadata.Id = value
-			case "name":
-				metadata.Name = value
-			case "author":
-				metadata.Author = value
-			case "version":
-				metadata.Version = value
-			case "description":
-				metadata.Description = value
-			case "icon":
-				metadata.Icon = value
-			case "keywords":
-				// Split keywords by comma or space
-				keywords := strings.FieldsFunc(value, func(c rune) bool {
-					return c == ',' || c == ' '
-				})
-				for i, keyword := range keywords {
-					keywords[i] = strings.TrimSpace(keyword)
+			// Check for JSON block end (when braces are balanced)
+			if braceDepth == 0 {
+				// Try to parse the collected JSON
+				jsonStr := jsonBuilder.String()
+				var metadata Metadata
+				unmarshalErr := json.Unmarshal([]byte(jsonStr), &metadata)
+				if unmarshalErr != nil {
+					return Metadata{}, fmt.Errorf("failed to parse JSON metadata block (starting at line %d): %w", jsonStartLine+1, unmarshalErr)
 				}
-				metadata.TriggerKeywords = keywords
-			case "minWoxVersion":
-				metadata.MinWoxVersion = value
+
+				// Set script-specific fields
+				metadata.Runtime = string(PLUGIN_RUNTIME_SCRIPT)
+				metadata.Entry = filepath.Base(scriptPath)
+
+				// Validate and set defaults
+				return m.validateAndSetScriptMetadataDefaults(metadata)
 			}
 		}
 	}
 
+	// No JSON block found
+	return Metadata{}, fmt.Errorf("no JSON metadata block found in script file. Script plugins must define metadata as a JSON object in comments")
+}
+
+// validateAndSetScriptMetadataDefaults validates required fields and sets default values
+func (m *Manager) validateAndSetScriptMetadataDefaults(metadata Metadata) (Metadata, error) {
 	// Validate required fields
 	if metadata.Id == "" {
-		return Metadata{}, fmt.Errorf("missing required field: @wox.id")
+		return Metadata{}, fmt.Errorf("missing required field: Id")
 	}
 	if metadata.Name == "" {
-		return Metadata{}, fmt.Errorf("missing required field: @wox.name")
+		return Metadata{}, fmt.Errorf("missing required field: Name")
 	}
 	if len(metadata.TriggerKeywords) == 0 {
-		return Metadata{}, fmt.Errorf("missing required field: @wox.keywords")
+		return Metadata{}, fmt.Errorf("missing required field: TriggerKeywords")
 	}
 
 	// Set default values
@@ -524,9 +540,14 @@ func (m *Manager) ParseScriptMetadata(ctx context.Context, scriptPath string) (M
 	if metadata.MinWoxVersion == "" {
 		metadata.MinWoxVersion = "2.0.0"
 	}
+	if metadata.Version == "" {
+		metadata.Version = "1.0.0"
+	}
 
 	// Set supported OS to all platforms by default
-	metadata.SupportedOS = []string{"Windows", "Linux", "Macos"}
+	if len(metadata.SupportedOS) == 0 {
+		metadata.SupportedOS = []string{"Windows", "Linux", "Macos"}
+	}
 
 	return metadata, nil
 }
@@ -796,185 +817,73 @@ func (m *Manager) GetResultForFailedQuery(ctx context.Context, pluginMetadata Me
 }
 
 func (m *Manager) getDefaultActions(ctx context.Context, pluginInstance *Instance, query Query, title, subTitle string) (defaultActions []QueryResultAction) {
-	if setting.GetSettingManager().IsFavoriteResult(ctx, pluginInstance.Metadata.Id, title, subTitle) {
+	// Declare both actions first
+	var addToFavoriteAction func(context.Context, ActionContext)
+	var removeFromFavoriteAction func(context.Context, ActionContext)
+
+	// Define add to favorite action
+	addToFavoriteAction = func(ctx context.Context, actionContext ActionContext) {
+		setting.GetSettingManager().PinResult(ctx, pluginInstance.Metadata.Id, title, subTitle)
+
+		// Get API instance
+		api := NewAPI(pluginInstance)
+		api.Notify(ctx, "i18n:plugin_manager_pin_in_query_success")
+
+		// Get current result state
+		updatableResult := api.GetUpdatableResult(ctx, actionContext.ResultId)
+		if updatableResult == nil {
+			return // Result no longer visible
+		}
+
+		// Update the result to refresh UI
+		// Note: We don't need to manually add favorite tail here because:
+		// 1. GetUpdatableResult filters out system tails (including favorite icon)
+		// 2. PolishUpdatableResult will automatically add favorite tail back if this is a favorite result
+		// 3. This ensures the favorite tail is always managed by the system
+		api.UpdateResult(ctx, *updatableResult)
+	}
+
+	// Define remove from favorite action
+	removeFromFavoriteAction = func(ctx context.Context, actionContext ActionContext) {
+		setting.GetSettingManager().UnpinResult(ctx, pluginInstance.Metadata.Id, title, subTitle)
+
+		// Get API instance
+		api := NewAPI(pluginInstance)
+		api.Notify(ctx, "i18n:plugin_manager_unpin_in_query")
+
+		// Get current result state
+		updatableResult := api.GetUpdatableResult(ctx, actionContext.ResultId)
+		if updatableResult == nil {
+			return // Result no longer visible
+		}
+
+		// Update the result to refresh UI
+		// Note: We don't need to manually remove favorite tail here because:
+		// 1. GetUpdatableResult filters out system tails (including favorite icon)
+		// 2. PolishUpdatableResult will NOT add favorite tail back if this is not a favorite result
+		// 3. This ensures the favorite tail is always managed by the system
+		api.UpdateResult(ctx, *updatableResult)
+	}
+
+	if setting.GetSettingManager().IsPinedResult(ctx, pluginInstance.Metadata.Id, title, subTitle) {
 		defaultActions = append(defaultActions, QueryResultAction{
-			Name:           "i18n:plugin_manager_remove_from_favorite",
-			Icon:           RemoveFromFavIcon,
-			IsSystemAction: true,
-			Action: func(ctx context.Context, actionContext ActionContext) {
-				setting.GetSettingManager().RemoveFavoriteResult(ctx, pluginInstance.Metadata.Id, title, subTitle)
-			},
+			Name:                   "i18n:plugin_manager_unpin_in_query",
+			Icon:                   UnpinIcon,
+			IsSystemAction:         true,
+			PreventHideAfterAction: true,
+			Action:                 removeFromFavoriteAction,
 		})
 	} else {
 		defaultActions = append(defaultActions, QueryResultAction{
-			Name:           "i18n:plugin_manager_add_to_favorite",
-			Icon:           AddToFavIcon,
-			IsSystemAction: true,
-			Action: func(ctx context.Context, actionContext ActionContext) {
-				setting.GetSettingManager().AddFavoriteResult(ctx, pluginInstance.Metadata.Id, title, subTitle)
-			},
+			Name:                   "i18n:plugin_manager_pin_in_query",
+			Icon:                   PinIcon,
+			IsSystemAction:         true,
+			PreventHideAfterAction: true,
+			Action:                 addToFavoriteAction,
 		})
 	}
 
 	return defaultActions
-}
-
-func (m *Manager) PolishResult(ctx context.Context, pluginInstance *Instance, query Query, result QueryResult) QueryResult {
-	// set default id
-	if result.Id == "" {
-		result.Id = uuid.NewString()
-	}
-	for actionIndex := range result.Actions {
-		if result.Actions[actionIndex].Id == "" {
-			result.Actions[actionIndex].Id = uuid.NewString()
-		}
-		if result.Actions[actionIndex].Icon.IsEmpty() {
-			// set default action icon if not present
-			result.Actions[actionIndex].Icon = DefaultActionIcon
-		}
-	}
-
-	originalIcon := result.Icon
-
-	// convert icon
-	result.Icon = common.ConvertIcon(ctx, result.Icon, pluginInstance.PluginDirectory)
-	for i := range result.Tails {
-		if result.Tails[i].Type == QueryResultTailTypeImage {
-			result.Tails[i].Image = common.ConvertIcon(ctx, result.Tails[i].Image, pluginInstance.PluginDirectory)
-		}
-	}
-
-	// add default preview for selection query if no preview is set
-	if query.Type == QueryTypeSelection && result.Preview.PreviewType == "" {
-		if query.Selection.Type == selection.SelectionTypeText {
-			result.Preview = WoxPreview{
-				PreviewType: WoxPreviewTypeText,
-				PreviewData: query.Selection.Text,
-			}
-		}
-		if query.Selection.Type == selection.SelectionTypeFile {
-			result.Preview = WoxPreview{
-				PreviewType: WoxPreviewTypeMarkdown,
-				PreviewData: m.formatFileListPreview(ctx, query.Selection.FilePaths),
-			}
-		}
-	}
-
-	// translate title
-	result.Title = m.translatePlugin(ctx, pluginInstance, result.Title)
-	// translate subtitle
-	result.SubTitle = m.translatePlugin(ctx, pluginInstance, result.SubTitle)
-	// translate tail text
-	for i := range result.Tails {
-		if result.Tails[i].Type == QueryResultTailTypeText {
-			result.Tails[i].Text = m.translatePlugin(ctx, pluginInstance, result.Tails[i].Text)
-		}
-	}
-	// translate preview properties
-	var previewProperties = make(map[string]string)
-	for key, value := range result.Preview.PreviewProperties {
-		translatedKey := m.translatePlugin(ctx, pluginInstance, key)
-		previewProperties[translatedKey] = value
-	}
-	result.Preview.PreviewProperties = previewProperties
-	// translate action names
-	for actionIndex := range result.Actions {
-		result.Actions[actionIndex].Name = m.translatePlugin(ctx, pluginInstance, result.Actions[actionIndex].Name)
-	}
-	// translate preview data if preview type is text
-	if result.Preview.PreviewType == WoxPreviewTypeText || result.Preview.PreviewType == WoxPreviewTypeMarkdown {
-		result.Preview.PreviewData = m.translatePlugin(ctx, pluginInstance, result.Preview.PreviewData)
-	}
-
-	// set first action as default if no default action is set
-	defaultActionCount := lo.CountBy(result.Actions, func(item QueryResultAction) bool {
-		return item.IsDefault
-	})
-	if defaultActionCount == 0 && len(result.Actions) > 0 {
-		result.Actions[0].IsDefault = true
-		result.Actions[0].Hotkey = "Enter"
-	}
-
-	//move default action to first one of the actions
-	sort.Slice(result.Actions, func(i, j int) bool {
-		return result.Actions[i].IsDefault
-	})
-
-	var resultCache = &QueryResultCache{
-		ResultId:       result.Id,
-		ResultTitle:    result.Title,
-		ResultSubTitle: result.SubTitle,
-		ContextData:    result.ContextData,
-		Icon:           originalIcon,
-		PluginInstance: pluginInstance,
-		Query:          query,
-		Actions:        util.NewHashMap[string, func(ctx context.Context, actionContext ActionContext)](),
-	}
-
-	// store actions for ui invoke later
-	for actionIndex := range result.Actions {
-		var action = result.Actions[actionIndex]
-
-		// if default action's hotkey is empty, set it as Enter
-		if action.IsDefault && action.Hotkey == "" {
-			result.Actions[actionIndex].Hotkey = "Enter"
-		}
-
-		// normalize hotkey for platform specific modifiers
-		result.Actions[actionIndex].Hotkey = normalizeHotkeyForPlatform(result.Actions[actionIndex].Hotkey)
-
-		if action.Action != nil {
-			resultCache.Actions.Store(action.Id, action.Action)
-		}
-	}
-
-	// if query is input and trigger keyword is global, disable preview and group
-	if query.IsGlobalQuery() {
-		result.Preview = WoxPreview{}
-		result.Group = ""
-		result.GroupScore = 0
-	}
-
-	// store preview for ui invoke later
-	// because preview may contain some heavy data (E.g. image or large text),
-	// we will store preview in cache and only send preview to ui when user select the result
-	var maximumPreviewSize = 1024
-	if !result.Preview.IsEmpty() && result.Preview.PreviewType != WoxPreviewTypeRemote && len(result.Preview.PreviewData) > maximumPreviewSize {
-		resultCache.Preview = result.Preview
-		result.Preview = WoxPreview{
-			PreviewType: WoxPreviewTypeRemote,
-			PreviewData: fmt.Sprintf("/preview?id=%s", result.Id),
-		}
-	}
-
-	if result.RefreshInterval > 0 && result.OnRefresh != nil {
-		newInterval := int(math.Floor(float64(result.RefreshInterval)/100) * 100)
-		if result.RefreshInterval != newInterval {
-			logger.Info(ctx, fmt.Sprintf("[%s] result(%s) refresh interval %d is not divisible by 100, use %d instead", pluginInstance.Metadata.Name, result.Id, result.RefreshInterval, newInterval))
-			result.RefreshInterval = newInterval
-		}
-		resultCache.Refresh = result.OnRefresh
-	}
-
-	ignoreAutoScore := pluginInstance.Metadata.IsSupportFeature(MetadataFeatureIgnoreAutoScore)
-	if !ignoreAutoScore {
-		score := m.calculateResultScore(ctx, pluginInstance.Metadata.Id, result.Title, result.SubTitle, query.RawQuery)
-		if score > 0 {
-			logger.Debug(ctx, fmt.Sprintf("<%s> result(%s) add score: %d", pluginInstance.Metadata.Name, result.Title, score))
-			result.Score += score
-		}
-	}
-	// check if result is favorite result
-	// favorite result will not be affected by ignoreAutoScore setting, so we add score here
-	if setting.GetSettingManager().IsFavoriteResult(ctx, pluginInstance.Metadata.Id, result.Title, result.SubTitle) {
-		favScore := int64(100000)
-		logger.Debug(ctx, fmt.Sprintf("<%s> result(%s) is favorite result, add score: %d", pluginInstance.Metadata.Name, result.Title, favScore))
-		result.Score += favScore
-	}
-
-	m.resultCache.Store(result.Id, resultCache)
-
-	return result
 }
 
 func (m *Manager) formatFileListPreview(ctx context.Context, filePaths []string) string {
@@ -1045,9 +954,11 @@ func (m *Manager) calculateResultScore(ctx context.Context, pluginId, title, sub
 	return score
 }
 
-func (m *Manager) polishRefreshableResult(ctx context.Context, resultCache *QueryResultCache, result RefreshableResult) RefreshableResult {
-	pluginInstance := resultCache.PluginInstance
-
+func (m *Manager) PolishResult(ctx context.Context, pluginInstance *Instance, query Query, result QueryResult) QueryResult {
+	// set default id
+	if result.Id == "" {
+		result.Id = uuid.NewString()
+	}
 	for actionIndex := range result.Actions {
 		if result.Actions[actionIndex].Id == "" {
 			result.Actions[actionIndex].Id = uuid.NewString()
@@ -1056,6 +967,59 @@ func (m *Manager) polishRefreshableResult(ctx context.Context, resultCache *Quer
 			// set default action icon if not present
 			result.Actions[actionIndex].Icon = DefaultActionIcon
 		}
+	}
+
+	// convert icon
+	result.Icon = common.ConvertIcon(ctx, result.Icon, pluginInstance.PluginDirectory)
+	for i := range result.Tails {
+		if result.Tails[i].Type == QueryResultTailTypeImage {
+			result.Tails[i].Image = common.ConvertIcon(ctx, result.Tails[i].Image, pluginInstance.PluginDirectory)
+		}
+	}
+
+	// add default preview for selection query if no preview is set
+	if query.Type == QueryTypeSelection && result.Preview.PreviewType == "" {
+		if query.Selection.Type == selection.SelectionTypeText {
+			result.Preview = WoxPreview{
+				PreviewType: WoxPreviewTypeText,
+				PreviewData: query.Selection.Text,
+			}
+		}
+		if query.Selection.Type == selection.SelectionTypeFile {
+			result.Preview = WoxPreview{
+				PreviewType: WoxPreviewTypeMarkdown,
+				PreviewData: m.formatFileListPreview(ctx, query.Selection.FilePaths),
+			}
+		}
+	}
+
+	// translate title
+	result.Title = m.translatePlugin(ctx, pluginInstance, result.Title)
+	// translate subtitle
+	result.SubTitle = m.translatePlugin(ctx, pluginInstance, result.SubTitle)
+	// translate tail text and assign IDs if not present
+	for i := range result.Tails {
+		if result.Tails[i].Id == "" {
+			result.Tails[i].Id = uuid.NewString()
+		}
+		if result.Tails[i].Type == QueryResultTailTypeText {
+			result.Tails[i].Text = m.translatePlugin(ctx, pluginInstance, result.Tails[i].Text)
+		}
+	}
+	// translate preview properties
+	var previewProperties = make(map[string]string)
+	for key, value := range result.Preview.PreviewProperties {
+		translatedKey := m.translatePlugin(ctx, pluginInstance, key)
+		previewProperties[translatedKey] = value
+	}
+	result.Preview.PreviewProperties = previewProperties
+	// translate action names
+	for actionIndex := range result.Actions {
+		result.Actions[actionIndex].Name = m.translatePlugin(ctx, pluginInstance, result.Actions[actionIndex].Name)
+	}
+	// translate preview data if preview type is text
+	if result.Preview.PreviewType == WoxPreviewTypeText || result.Preview.PreviewType == WoxPreviewTypeMarkdown {
+		result.Preview.PreviewData = m.translatePlugin(ctx, pluginInstance, result.Preview.PreviewData)
 	}
 
 	// set first action as default if no default action is set
@@ -1072,59 +1036,294 @@ func (m *Manager) polishRefreshableResult(ctx context.Context, resultCache *Quer
 		return result.Actions[i].IsDefault
 	})
 
-	// convert icon
-	result.Icon = common.ConvertIcon(ctx, result.Icon, pluginInstance.PluginDirectory)
-	for i := range result.Tails {
-		if result.Tails[i].Type == QueryResultTailTypeImage {
-			result.Tails[i].Image = common.ConvertIcon(ctx, result.Tails[i].Image, pluginInstance.PluginDirectory)
-		}
-	}
-
-	// translate title
-	result.Title = m.translatePlugin(ctx, pluginInstance, result.Title)
-	// translate subtitle
-	result.SubTitle = m.translatePlugin(ctx, pluginInstance, result.SubTitle)
-	// translate tail text
-	for i := range result.Tails {
-		if result.Tails[i].Type == QueryResultTailTypeText {
-			result.Tails[i].Text = m.translatePlugin(ctx, pluginInstance, result.Tails[i].Text)
-		}
-	}
-	// translate preview properties
-	var previewProperties = make(map[string]string)
-	for key, value := range result.Preview.PreviewProperties {
-		translatedKey := m.translatePlugin(ctx, pluginInstance, key)
-		previewProperties[translatedKey] = value
-	}
-	result.Preview.PreviewProperties = previewProperties
-	// translate action names
+	// normalize hotkeys for all actions
 	for actionIndex := range result.Actions {
-		result.Actions[actionIndex].Name = m.translatePlugin(ctx, pluginInstance, result.Actions[actionIndex].Name)
-	}
+		var action = result.Actions[actionIndex]
 
-	// update result cache
-	resultCache.ResultTitle = result.Title
-	resultCache.ResultSubTitle = result.SubTitle
-	resultCache.ContextData = result.ContextData
-	resultCache.Actions = util.NewHashMap[string, func(ctx context.Context, actionContext ActionContext)]()
-	for _, newAction := range result.Actions {
-		if newAction.Action != nil {
-			resultCache.Actions.Store(newAction.Id, newAction.Action)
+		// if default action's hotkey is empty, set it as Enter
+		if action.IsDefault && action.Hotkey == "" {
+			result.Actions[actionIndex].Hotkey = "Enter"
 		}
+
+		// normalize hotkey for platform specific modifiers
+		result.Actions[actionIndex].Hotkey = normalizeHotkeyForPlatform(result.Actions[actionIndex].Hotkey)
 	}
 
-	// convert non-remote preview to remote preview
+	// if query is input and trigger keyword is global, disable preview and group
+	if query.IsGlobalQuery() {
+		result.Preview = WoxPreview{}
+		result.Group = ""
+		result.GroupScore = 0
+	}
+
+	// store preview for ui invoke later
 	// because preview may contain some heavy data (E.g. image or large text),
 	// we will store preview in cache and only send preview to ui when user select the result
-	if !result.Preview.IsEmpty() && result.Preview.PreviewType != WoxPreviewTypeRemote {
-		resultCache.Preview = result.Preview
+	var maximumPreviewSize = 1024
+	var originalPreview = result.Preview
+	if !result.Preview.IsEmpty() && result.Preview.PreviewType != WoxPreviewTypeRemote && len(result.Preview.PreviewData) > maximumPreviewSize {
 		result.Preview = WoxPreview{
 			PreviewType: WoxPreviewTypeRemote,
-			PreviewData: fmt.Sprintf("/preview?id=%s", resultCache.ResultId),
+			PreviewData: fmt.Sprintf("/preview?id=%s", result.Id),
 		}
+	}
+
+	ignoreAutoScore := pluginInstance.Metadata.IsSupportFeature(MetadataFeatureIgnoreAutoScore)
+	if !ignoreAutoScore {
+		score := m.calculateResultScore(ctx, pluginInstance.Metadata.Id, result.Title, result.SubTitle, query.RawQuery)
+		if score > 0 {
+			logger.Debug(ctx, fmt.Sprintf("<%s> result(%s) add score: %d", pluginInstance.Metadata.Name, result.Title, score))
+			result.Score += score
+		}
+	}
+	// check if result is favorite result
+	// favorite result will not be affected by ignoreAutoScore setting, so we add score here
+	isFavorite := setting.GetSettingManager().IsPinedResult(ctx, pluginInstance.Metadata.Id, result.Title, result.SubTitle)
+	if isFavorite {
+		favScore := int64(100000)
+		logger.Debug(ctx, fmt.Sprintf("<%s> result(%s) is favorite result, add score: %d", pluginInstance.Metadata.Name, result.Title, favScore))
+		result.Score += favScore
+
+		// Add favorite icon to tails if not already present
+		hasFavoriteTail := false
+		for _, tail := range result.Tails {
+			if tail.ContextData == favoriteTailContextData {
+				hasFavoriteTail = true
+				break
+			}
+		}
+		if !hasFavoriteTail {
+			result.Tails = append(result.Tails, QueryResultTail{
+				Type:         QueryResultTailTypeImage,
+				Image:        PinIcon,
+				ContextData:  favoriteTailContextData, // Use ContextData to identify favorite tail
+				IsSystemTail: true,                    // Mark as system tail so it will be filtered out in GetUpdatableResult
+			})
+		}
+	}
+
+	// Create cache at the end
+	resultCopy := result
+	// Because we may have replaced preview with remote preview
+	// we need to restore the original preview in the cache
+	resultCopy.Preview = originalPreview
+	m.resultCache.Store(result.Id, &QueryResultCache{
+		Result:         resultCopy,
+		PluginInstance: pluginInstance,
+		Query:          query,
+	})
+
+	return result
+}
+
+func (m *Manager) PolishUpdatableResult(ctx context.Context, pluginInstance *Instance, result UpdatableResult) UpdatableResult {
+	// Get result cache to update it
+	resultCache, found := m.resultCache.Load(result.Id)
+	if !found {
+		return result // Result not in cache, just return as-is
+	}
+
+	// Polish actions if they are being updated
+	if result.Actions != nil {
+		actions := *result.Actions
+
+		// Set default action id and icon if not present
+		for actionIndex := range actions {
+			if actions[actionIndex].Id == "" {
+				actions[actionIndex].Id = uuid.NewString()
+			}
+			if actions[actionIndex].Icon.IsEmpty() {
+				actions[actionIndex].Icon = DefaultActionIcon
+			}
+		}
+
+		// For external plugins (Node.js/Python), create proxy action callbacks
+		// These callbacks will invoke the host's action method, which will then
+		// call the actual cached callback in the plugin host
+		if proxyCreator, ok := pluginInstance.Plugin.(ActionProxyCreator); ok {
+			for actionIndex := range actions {
+				// Always create proxy callback for external plugins
+				// because the Action field is not serialized and will be nil
+				if actions[actionIndex].Action == nil {
+					actions[actionIndex].Action = proxyCreator.CreateActionProxy(actions[actionIndex].Id)
+				}
+			}
+		}
+
+		// Set first action as default if no default action is set
+		defaultActionCount := lo.CountBy(actions, func(item QueryResultAction) bool {
+			return item.IsDefault
+		})
+		if defaultActionCount == 0 && len(actions) > 0 {
+			actions[0].IsDefault = true
+			actions[0].Hotkey = "Enter"
+		}
+
+		// If default action's hotkey is empty, set it as Enter
+		for actionIndex := range actions {
+			if actions[actionIndex].IsDefault && actions[actionIndex].Hotkey == "" {
+				actions[actionIndex].Hotkey = "Enter"
+			}
+			// Normalize hotkey for platform specific modifiers
+			actions[actionIndex].Hotkey = normalizeHotkeyForPlatform(actions[actionIndex].Hotkey)
+		}
+
+		// Move default action to first position
+		sort.Slice(actions, func(i, j int) bool {
+			return actions[i].IsDefault
+		})
+
+		// Add system actions (like pin/unpin)
+		// System actions are added after user actions
+		systemActions := m.getDefaultActions(ctx, pluginInstance, resultCache.Query, resultCache.Result.Title, resultCache.Result.SubTitle)
+		actions = append(actions, systemActions...)
+
+		// Translate action names
+		for actionIndex := range actions {
+			actions[actionIndex].Name = m.translatePlugin(ctx, pluginInstance, actions[actionIndex].Name)
+		}
+
+		result.Actions = &actions
+
+		// Update cache: merge new actions with cached actions to preserve callbacks
+		// When updating actions, we need to preserve the Action callbacks from cache
+		// because callbacks cannot be serialized and may be nil in the updated actions
+		for i := range actions {
+			// Find matching action in cache by ID
+			var cachedAction *QueryResultAction
+			for j := range resultCache.Result.Actions {
+				if resultCache.Result.Actions[j].Id == actions[i].Id {
+					cachedAction = &resultCache.Result.Actions[j]
+					break
+				}
+			}
+
+			// If action callback is nil in the new action but exists in cache, preserve it
+			if actions[i].Action == nil && cachedAction != nil && cachedAction.Action != nil {
+				actions[i].Action = cachedAction.Action
+			}
+		}
+
+		// Update cache with merged actions
+		resultCache.Result.Actions = actions
+	}
+
+	// Translate title if present
+	if result.Title != nil {
+		translated := m.translatePlugin(ctx, pluginInstance, *result.Title)
+		result.Title = &translated
+		resultCache.Result.Title = translated
+	}
+
+	// Translate subtitle if present
+	if result.SubTitle != nil {
+		translated := m.translatePlugin(ctx, pluginInstance, *result.SubTitle)
+		result.SubTitle = &translated
+		resultCache.Result.SubTitle = translated
+	}
+
+	// Translate tails if present
+	if result.Tails != nil {
+		tails := *result.Tails
+		for i := range tails {
+			// Assign ID if not present
+			if tails[i].Id == "" {
+				tails[i].Id = uuid.NewString()
+			}
+			if tails[i].Type == QueryResultTailTypeText {
+				tails[i].Text = m.translatePlugin(ctx, pluginInstance, tails[i].Text)
+			}
+			if tails[i].Type == QueryResultTailTypeImage {
+				tails[i].Image = common.ConvertIcon(ctx, tails[i].Image, pluginInstance.PluginDirectory)
+			}
+		}
+
+		// Add favorite icon to tails if this is a favorite result
+		isFavorite := setting.GetSettingManager().IsPinedResult(ctx, pluginInstance.Metadata.Id, resultCache.Result.Title, resultCache.Result.SubTitle)
+		if isFavorite {
+			// Check if favorite tail already exists
+			hasFavoriteTail := false
+			for _, tail := range tails {
+				if tail.ContextData == favoriteTailContextData {
+					hasFavoriteTail = true
+					break
+				}
+			}
+			if !hasFavoriteTail {
+				tails = append(tails, QueryResultTail{
+					Type:         QueryResultTailTypeImage,
+					Image:        PinIcon,
+					ContextData:  favoriteTailContextData, // Use ContextData to identify favorite tail
+					IsSystemTail: true,                    // Mark as system tail so it will be filtered out in GetUpdatableResult
+				})
+			}
+		}
+
+		result.Tails = &tails
+		resultCache.Result.Tails = tails
+	}
+
+	// Translate preview properties if present
+	if result.Preview != nil {
+		preview := *result.Preview
+		var previewProperties = make(map[string]string)
+		for key, value := range preview.PreviewProperties {
+			translatedKey := m.translatePlugin(ctx, pluginInstance, key)
+			previewProperties[translatedKey] = value
+		}
+		preview.PreviewProperties = previewProperties
+		result.Preview = &preview
+		resultCache.Result.Preview = preview
+	}
+
+	// Update icon in cache if present
+	if result.Icon != nil {
+		resultCache.Result.Icon = *result.Icon
 	}
 
 	return result
+}
+
+func (m *Manager) GetUpdatableResult(ctx context.Context, resultId string) *UpdatableResult {
+	// Try to find the result in the cache
+	resultCache, found := m.resultCache.Load(resultId)
+	if !found {
+		return nil // Result not found (no longer visible)
+	}
+
+	// Construct UpdatableResult from cache
+	title := resultCache.Result.Title
+	subTitle := resultCache.Result.SubTitle
+	icon := resultCache.Result.Icon
+	preview := resultCache.Result.Preview
+
+	// Make a copy of tails to avoid modifying cache when developer appends to it
+	// Filter out system tails (they will be added back in polish)
+	tails := []QueryResultTail{}
+	for _, tail := range resultCache.Result.Tails {
+		if !tail.IsSystemTail {
+			tails = append(tails, tail)
+		}
+	}
+
+	// Make a copy of actions to avoid modifying cache when developer modifies it
+	// Filter out system actions (they will be added back in polish)
+	actions := []QueryResultAction{}
+	for _, action := range resultCache.Result.Actions {
+		if !action.IsSystemAction {
+			actions = append(actions, action)
+		}
+	}
+
+	return &UpdatableResult{
+		Id:       resultId,
+		Title:    &title,
+		SubTitle: &subTitle,
+		Icon:     &icon,
+		Preview:  &preview,
+		Tails:    &tails,
+		Actions:  &actions,
+	}
 }
 
 func (m *Manager) Query(ctx context.Context, query Query) (results chan []QueryResultUI, done chan bool) {
@@ -1293,7 +1492,14 @@ func (m *Manager) translatePlugin(ctx context.Context, pluginInstance *Instance,
 	if pluginInstance.IsSystemPlugin {
 		return i18n.GetI18nManager().TranslateWox(ctx, key)
 	} else {
-		return i18n.GetI18nManager().TranslatePlugin(ctx, key, pluginInstance.PluginDirectory)
+		// Try plugin translation first
+		translated := i18n.GetI18nManager().TranslatePlugin(ctx, key, pluginInstance.PluginDirectory)
+		// If translation failed, fallback to system translation
+		// This handles cases where third-party plugins have system actions (like "Pin to current query")
+		if key == translated {
+			translated = i18n.GetI18nManager().TranslateWox(ctx, key)
+		}
+		return translated
 	}
 }
 
@@ -1402,13 +1608,28 @@ func (m *Manager) ExecuteAction(ctx context.Context, resultId string, actionId s
 	if !found {
 		return fmt.Errorf("result cache not found for result id (execute action): %s", resultId)
 	}
-	action, exist := resultCache.Actions.Load(actionId)
-	if !exist {
+
+	// Find the action in cache
+	var actionCache *QueryResultAction
+	for i := range resultCache.Result.Actions {
+		if resultCache.Result.Actions[i].Id == actionId {
+			actionCache = &resultCache.Result.Actions[i]
+			break
+		}
+	}
+	if actionCache == nil {
 		return fmt.Errorf("action not found for result id: %s, action id: %s", resultId, actionId)
 	}
 
-	action(ctx, ActionContext{
-		ContextData: resultCache.ContextData,
+	// Check if action callback is nil
+	if actionCache.Action == nil {
+		return fmt.Errorf("action callback is nil for result id: %s, action id: %s", resultId, actionId)
+	}
+
+	actionCache.Action(ctx, ActionContext{
+		ResultId:       resultId,
+		ResultActionId: actionId,
+		ContextData:    resultCache.Result.ContextData,
 	})
 
 	util.Go(ctx, fmt.Sprintf("[%s] post execute action", resultCache.PluginInstance.Metadata.Name), func() {
@@ -1420,16 +1641,16 @@ func (m *Manager) ExecuteAction(ctx context.Context, resultId string, actionId s
 
 func (m *Manager) postExecuteAction(ctx context.Context, resultCache *QueryResultCache) {
 	// Add actioned result for statistics
-	setting.GetSettingManager().AddActionedResult(ctx, resultCache.PluginInstance.Metadata.Id, resultCache.ResultTitle, resultCache.ResultSubTitle, resultCache.Query.RawQuery)
+	setting.GetSettingManager().AddActionedResult(ctx, resultCache.PluginInstance.Metadata.Id, resultCache.Result.Title, resultCache.Result.SubTitle, resultCache.Query.RawQuery)
 
 	// Add to MRU if plugin supports it
 	if resultCache.PluginInstance.Metadata.IsSupportFeature(MetadataFeatureMRU) {
 		mruItem := setting.MRUItem{
 			PluginID:    resultCache.PluginInstance.Metadata.Id,
-			Title:       resultCache.ResultTitle,
-			SubTitle:    resultCache.ResultSubTitle,
-			Icon:        resultCache.Icon,
-			ContextData: resultCache.ContextData,
+			Title:       resultCache.Result.Title,
+			SubTitle:    resultCache.Result.SubTitle,
+			Icon:        resultCache.Result.Icon,
+			ContextData: resultCache.Result.ContextData,
 		}
 		if err := setting.GetSettingManager().AddMRUItem(ctx, mruItem); err != nil {
 			util.GetLogger().Error(ctx, fmt.Sprintf("failed to add MRU item: %s", err.Error()))
@@ -1446,73 +1667,6 @@ func (m *Manager) postExecuteAction(ctx context.Context, resultCache *QueryResul
 	}
 }
 
-func (m *Manager) ExecuteRefresh(ctx context.Context, refreshableResultWithId RefreshableResultWithResultId) (RefreshableResultWithResultId, error) {
-	var refreshableResult RefreshableResult
-	copyErr := copier.Copy(&refreshableResult, &refreshableResultWithId)
-	if copyErr != nil {
-		return RefreshableResultWithResultId{}, fmt.Errorf("failed to copy refreshable result: %w", copyErr)
-	}
-
-	// maybe user has changed the query, which may flush the result cache
-	resultCache, found := m.resultCache.Load(refreshableResultWithId.ResultId)
-	if !found {
-		return refreshableResultWithId, fmt.Errorf("result cache not found for result id (execute refresh): %s", refreshableResultWithId.ResultId)
-	}
-
-	//restore actions in cache
-	refreshableResult.Actions = []QueryResultAction{}
-	for _, action := range refreshableResultWithId.Actions {
-		// get actual action from cache
-		actionFunc, exist := resultCache.Actions.Load(action.Id)
-		if !exist {
-			continue
-		}
-		refreshableResult.Actions = append(refreshableResult.Actions, QueryResultAction{
-			Id:                     action.Id,
-			Name:                   action.Name,
-			Icon:                   action.Icon,
-			IsDefault:              action.IsDefault,
-			PreventHideAfterAction: action.PreventHideAfterAction,
-			Hotkey:                 action.Hotkey,
-			Action:                 actionFunc,
-			IsSystemAction:         action.IsSystemAction,
-		})
-	}
-
-	newResult := resultCache.Refresh(ctx, refreshableResult)
-
-	// add default actions if there is no system action
-	if lo.CountBy(newResult.Actions, func(action QueryResultAction) bool {
-		return action.IsSystemAction
-	}) == 0 {
-		defaultActions := m.getDefaultActions(ctx, resultCache.PluginInstance, resultCache.Query, newResult.Title, newResult.SubTitle)
-		newResult.Actions = append(newResult.Actions, defaultActions...)
-	}
-
-	newResult = m.polishRefreshableResult(ctx, resultCache, newResult)
-	return RefreshableResultWithResultId{
-		ResultId:        refreshableResultWithId.ResultId,
-		Title:           newResult.Title,
-		SubTitle:        newResult.SubTitle,
-		Icon:            newResult.Icon,
-		Tails:           newResult.Tails,
-		Preview:         newResult.Preview,
-		ContextData:     newResult.ContextData,
-		RefreshInterval: newResult.RefreshInterval,
-		Actions: lo.Map(newResult.Actions, func(action QueryResultAction, index int) QueryResultActionUI {
-			return QueryResultActionUI{
-				Id:                     action.Id,
-				Name:                   action.Name,
-				Icon:                   action.Icon,
-				IsDefault:              action.IsDefault,
-				PreventHideAfterAction: action.PreventHideAfterAction,
-				Hotkey:                 action.Hotkey,
-				IsSystemAction:         action.IsSystemAction,
-			}
-		}),
-	}, nil
-}
-
 func (m *Manager) GetResultPreview(ctx context.Context, resultId string) (WoxPreview, error) {
 	resultCache, found := m.resultCache.Load(resultId)
 	if !found {
@@ -1520,7 +1674,7 @@ func (m *Manager) GetResultPreview(ctx context.Context, resultId string) (WoxPre
 	}
 
 	// if preview text is too long, ellipsis it, otherwise UI maybe freeze when render
-	preview := resultCache.Preview
+	preview := resultCache.Result.Preview
 	if preview.PreviewType == WoxPreviewTypeText {
 		preview.PreviewData = util.EllipsisMiddle(preview.PreviewData, 2000)
 		// translate preview data if preview type is text
@@ -1683,10 +1837,9 @@ func (m *Manager) QueryMRU(ctx context.Context) []QueryResultUI {
 
 			// Add "Remove from MRU" action to each MRU result
 			removeMRUAction := QueryResultAction{
-				Id:     uuid.NewString(),
-				Name:   i18n.GetI18nManager().TranslateWox(ctx, "mru_remove_action"),
-				Icon:   common.NewWoxImageEmoji("🗑️"),
-				Hotkey: "ctrl+d",
+				Id:   uuid.NewString(),
+				Name: i18n.GetI18nManager().TranslateWox(ctx, "mru_remove_action"),
+				Icon: common.NewWoxImageEmoji("🗑️"),
 				Action: func(ctx context.Context, actionContext ActionContext) {
 					err := setting.GetSettingManager().RemoveMRUItem(ctx, item.PluginID, item.Title, item.SubTitle)
 					if err != nil {

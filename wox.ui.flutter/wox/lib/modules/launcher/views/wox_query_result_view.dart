@@ -47,12 +47,20 @@ class WoxQueryResultView extends GetView<WoxLauncherController> {
                     mainAxisAlignment: MainAxisAlignment.start,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Actions", style: TextStyle(color: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.actionContainerHeaderFontColor), fontSize: 16.0)),
+                      Text(controller.tr("ui_actions"),
+                          style: TextStyle(color: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.actionContainerHeaderFontColor), fontSize: 16.0)),
                       const Divider(),
                       WoxListView<WoxResultAction>(
                         controller: controller.actionListViewController,
                         maxHeight: 400,
                         listViewType: WoxListViewTypeEnum.WOX_LIST_VIEW_TYPE_ACTION.code,
+                        onFilteHotkeyPressed: (traceId, hotkey) {
+                          if (controller.isActionHotkey(hotkey)) {
+                            controller.hideActionPanel(traceId);
+                            return true;
+                          }
+                          return false;
+                        },
                       ),
                     ],
                   ),
@@ -76,6 +84,9 @@ class WoxQueryResultView extends GetView<WoxLauncherController> {
         listViewType: WoxListViewTypeEnum.WOX_LIST_VIEW_TYPE_RESULT.code,
         showFilter: false,
         maxHeight: WoxThemeUtil.instance.getMaxResultListViewHeight(),
+        onItemTapped: () {
+          controller.hideActionPanel(const UuidV4().generate());
+        },
       ),
     );
   }

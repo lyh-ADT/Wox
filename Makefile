@@ -1,4 +1,4 @@
-.PHONY: build clean _bundle_mac_app plugins help dev test test-all test-calculator test-converter test-plugin test-time test-network test-quick test-legacy only_test check_deps
+.PHONY: build clean host _bundle_mac_app plugins help dev test test-all test-calculator test-converter test-plugin test-time test-network test-quick test-legacy only_test check_deps
 
 # Determine the current platform
 ifeq ($(OS),Windows_NT)
@@ -33,6 +33,7 @@ help:
 	@echo "  build      Build all components"
 	@echo "  plugins    Update plugin store"
 	@echo "  clean      Clean release directory"
+	@echo "  host       Build plugin hosts"
 
 _check_deps:
 	@echo "Checking required dependencies..."
@@ -61,12 +62,33 @@ plugins:
 dev: _check_deps
 	# Build hosts and flutter
 	$(MAKE) -C wox.core woxmr-build
-	$(MAKE) -C wox.plugin.host.nodejs build
-	$(MAKE) -C wox.plugin.host.python build
+	$(MAKE) host
 	$(MAKE) -C wox.ui.flutter/wox build
 
-test: dev
-	$(MAKE) test-isolated
+host:
+	$(MAKE) -C wox.plugin.host.nodejs build
+	$(MAKE) -C wox.plugin.host.python build
+
+# Ensure required resource directories exist with dummy files for go:embed
+ensure-resources:
+	@mkdir -p wox.core/resource/ui/flutter
+	@touch wox.core/resource/ui/flutter/placeholder
+	@mkdir -p wox.core/resource/hosts
+	@touch wox.core/resource/hosts/placeholder
+	@mkdir -p wox.core/resource/others
+	@touch wox.core/resource/others/placeholder
+	@mkdir -p wox.core/resource/script_plugin_templates
+	@touch wox.core/resource/script_plugin_templates/placeholder
+
+clean-resources:
+	@rm -f wox.core/resource/ui/flutter/placeholder
+	@rm -f wox.core/resource/hosts/placeholder
+	@rm -f wox.core/resource/others/placeholder
+	@rm -f wox.core/resource/script_plugin_templates/placeholder
+
+# Test without rebuilding dependencies (fast)
+test: ensure-resources
+	@trap '$(MAKE) clean-resources' EXIT; $(MAKE) test-isolated
 
 # Test with virtual gui (ci)
 test-xvfb: dev

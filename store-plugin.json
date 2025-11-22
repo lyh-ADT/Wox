@@ -54,7 +54,7 @@
     "Id": "09ea2847-929c-440a-aa2c-9b74bcaae69f",
     "Name": "DeepL translator",
     "Author": "Wox-launcher",
-    "Version": "0.0.6",
+    "Version": "0.0.7",
     "MinWoxVersion": "2.0.0",
     "Runtime": "nodejs",
     "Description": "DeepL translation plugin for Wox",
@@ -65,7 +65,7 @@
       "https://raw.githubusercontent.com/Wox-launcher/Wox.Plugin.DeepL/main/assets/snapshot.png"
     ],
     "DateCreated": "2024-02-23 19:09:00",
-    "DateUpdated": "2024-10-24 15:04:11"
+    "DateUpdated": "2025-11-15 20:03:30"
   },
   {
     "Id": "84cb8c8f-1156-489d-a490-6d04fbc85d52",
@@ -99,7 +99,7 @@
       "https://raw.githubusercontent.com/lylwx/Wox.Plugin.OSXVolumeControl/main/snapshot.jpg"
     ],
     "DateCreated": "2024-05-21 15:50:00",
-    "DateUpdated": "2024-05-28 23:02:55"
+    "DateUpdated": "2025-11-13 16:25:10"
   },
   {
     "Id": "b5f1cd20-c38f-4c5f-8450-fdd066928e98",
@@ -139,7 +139,7 @@
     "Id": "9575a1fc-d81b-4947-bcce-bd075f118f3e",
     "Name": "RSS Reader",
     "Author": "qianlifeng",
-    "Version": "0.0.2",
+    "Version": "0.0.3",
     "MinWoxVersion": "2.0.0",
     "Runtime": "nodejs",
     "Description": "Read RSS feeds",
@@ -185,5 +185,22 @@
     ],
     "DateCreated": "2025-08-25 21:15:00",
     "DateUpdated": "2025-08-25 21:15:00"
+  },
+  {
+    "Id": "25cb95b8-af4c-4ccb-82d6-38843a9999c1",
+    "Name": "UUID Generator",
+    "Author": "qianlifeng",
+    "Version": "1.0.0",
+    "MinWoxVersion": "2.0.0",
+    "Runtime": "script",
+    "Description": "Generate various types of UUIDs",
+    "IconEmoji": "🆔",
+    "Website": "https://gist.githubusercontent.com/qianlifeng/82a2f748177ce47a900b4c4da3abfd28",
+    "DownloadUrl": "https://gist.githubusercontent.com/qianlifeng/82a2f748177ce47a900b4c4da3abfd28/raw/550e024164713aed2fc3bde3aef140bfa15409a3/Wox.Plugin.Script.UUID",
+    "ScreenshotUrls": [
+      "https://gist.github.com/user-attachments/assets/4a93ab0f-9496-4b5d-94a8-d8c2b6fb129a"
+    ],
+    "DateCreated": "2025-11-15 23:15:00",
+    "DateUpdated": "2025-11-15 23:15:00"
   }
 ]

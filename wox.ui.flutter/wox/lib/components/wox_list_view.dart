@@ -2,15 +2,16 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:uuid/v4.dart';
 import 'package:wox/components/wox_list_item_view.dart';
 import 'package:wox/components/wox_platform_focus.dart';
 import 'package:wox/controllers/wox_list_controller.dart';
+import 'package:wox/controllers/wox_setting_controller.dart';
 import 'package:wox/entity/wox_hotkey.dart';
 import 'package:wox/entity/wox_list_item.dart';
 import 'package:wox/enums/wox_direction_enum.dart';
 import 'package:wox/enums/wox_list_view_type_enum.dart';
-import 'package:wox/utils/log.dart';
 import 'package:wox/utils/wox_theme_util.dart';
 import 'package:wox/utils/color_util.dart';
 
@@ -19,6 +20,8 @@ class WoxListView<T> extends StatelessWidget {
   final WoxListViewType listViewType;
   final bool showFilter;
   final double maxHeight;
+  final VoidCallback? onItemTapped;
+  final bool Function(String traceId, HotKey hotkey)? onFilteHotkeyPressed;
 
   const WoxListView({
     super.key,
@@ -26,6 +29,8 @@ class WoxListView<T> extends StatelessWidget {
     required this.listViewType,
     this.showFilter = true,
     required this.maxHeight,
+    this.onItemTapped,
+    this.onFilteHotkeyPressed,
   });
 
   @override
@@ -49,63 +54,69 @@ class WoxListView<T> extends StatelessWidget {
                 }
               },
               child: Obx(
-                () => AnimatedSwitcher(
-                  duration: Duration.zero,
-                  child: ListView.builder(
-                    key: ValueKey(controller.items.length),
-                    shrinkWrap: true,
-                    controller: controller.scrollController,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: controller.items.length,
-                    itemExtent: WoxThemeUtil.instance.getResultListViewHeightByCount(1),
-                    itemBuilder: (context, index) {
-                      var item = controller.items[index];
-                      return MouseRegion(
-                        onEnter: (_) {
-                          if (controller.isMouseMoved && !item.value.isGroup) {
-                            Logger.instance.info(const UuidV4().generate(), "MOUSE: onenter, is mouse moved: ${controller.isMouseMoved}, is group: ${item.value.isGroup}");
-                            controller.updateHoveredIndex(index);
-                          }
-                        },
-                        onHover: (_) {
-                          if (!controller.isMouseMoved && !item.value.isGroup) {
-                            Logger.instance.info(const UuidV4().generate(), "MOUSE: onHover, is mouse moved: ${controller.isMouseMoved}, is group: ${item.value.isGroup}");
-                            controller.isMouseMoved = true;
-                            controller.updateHoveredIndex(index);
-                          }
-                        },
-                        onExit: (_) {
-                          if (!item.value.isGroup && controller.hoveredIndex.value == index) {
-                            controller.clearHoveredResult();
-                          }
-                        },
-                        child: GestureDetector(
-                          onTap: () {
-                            if (!item.value.isGroup) {
-                              controller.updateActiveIndex(const UuidV4().generate(), index);
-                              controller.onItemActive?.call(const UuidV4().generate(), item.value);
-                            }
-                          },
-                          onDoubleTap: () {
-                            if (!item.value.isGroup) {
-                              controller.onItemExecuted?.call(const UuidV4().generate(), item.value);
-                            }
-                          },
-                          child: Obx(
-                            () => WoxListItemView(
-                              key: ValueKey(item.value.id),
-                              item: item.value,
-                              woxTheme: WoxThemeUtil.instance.currentTheme.value,
-                              isActive: controller.activeIndex.value == index,
-                              isHovered: controller.hoveredIndex.value == index,
-                              listViewType: listViewType,
+                () => controller.items.isEmpty && controller.filterBoxController.text.isNotEmpty
+                    ? SizedBox(
+                        height: WoxThemeUtil.instance.getResultListViewHeightByCount(1),
+                        child: Center(
+                          child: Text(
+                            Get.find<WoxSettingController>().tr('ui_no_matches'),
+                            style: TextStyle(
+                              fontSize: 14.0,
+                              color: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.queryBoxFontColor).withOpacity(0.5),
                             ),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ),
+                      )
+                    : AnimatedSwitcher(
+                        duration: Duration.zero,
+                        child: ListView.builder(
+                          key: ValueKey(controller.items.length),
+                          shrinkWrap: true,
+                          controller: controller.scrollController,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: controller.items.length,
+                          itemExtent: WoxThemeUtil.instance.getResultListViewHeightByCount(1),
+                          itemBuilder: (context, index) {
+                            var item = controller.items[index];
+                            return MouseRegion(
+                              onEnter: (_) {
+                                if (controller.isMouseMoved && !item.value.isGroup) {
+                                  controller.updateHoveredIndex(index);
+                                }
+                              },
+                              onHover: (_) {
+                                if (!controller.isMouseMoved && !item.value.isGroup) {
+                                  controller.isMouseMoved = true;
+                                  controller.updateHoveredIndex(index);
+                                }
+                              },
+                              onExit: (_) {
+                                if (!item.value.isGroup && controller.hoveredIndex.value == index) {
+                                  controller.clearHoveredResult();
+                                }
+                              },
+                              child: _WoxListItemGestureWrapper<T>(
+                                controller: controller,
+                                index: index,
+                                item: item,
+                                onItemTapped: () {
+                                  onItemTapped?.call();
+                                },
+                                child: Obx(
+                                  () => WoxListItemView(
+                                    key: ValueKey(item.value.id),
+                                    item: item.value,
+                                    woxTheme: WoxThemeUtil.instance.currentTheme.value,
+                                    isActive: controller.activeIndex.value == index,
+                                    isHovered: controller.hoveredIndex.value == index,
+                                    listViewType: listViewType,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
               ),
             ),
           ),
@@ -156,6 +167,11 @@ class WoxListView<T> extends StatelessWidget {
               var pressedHotkey = WoxHotkey.parseNormalHotkeyFromEvent(event);
               if (pressedHotkey == null) {
                 return KeyEventResult.ignored;
+              }
+
+              // Let caller handle hotkey first
+              if (onFilteHotkeyPressed != null && onFilteHotkeyPressed!(traceId, pressedHotkey)) {
+                return KeyEventResult.handled;
               }
 
               Rx<WoxListItem<T>>? itemMatchedHotkey = controller.items.firstWhereOrNull((element) {
@@ -214,6 +230,64 @@ class WoxListView<T> extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _WoxListItemGestureWrapper<T> extends StatefulWidget {
+  final WoxListController<T> controller;
+  final int index;
+  final Rx<WoxListItem<T>> item;
+  final Widget child;
+  final VoidCallback? onItemTapped;
+
+  const _WoxListItemGestureWrapper({
+    required this.controller,
+    required this.index,
+    required this.item,
+    required this.child,
+    this.onItemTapped,
+  });
+
+  @override
+  State<_WoxListItemGestureWrapper<T>> createState() => _WoxListItemGestureWrapperState<T>();
+}
+
+class _WoxListItemGestureWrapperState<T> extends State<_WoxListItemGestureWrapper<T>> {
+  DateTime? _lastTapTime;
+  static const _doubleClickThreshold = Duration(milliseconds: 200);
+
+  void _handleTapDown() {
+    if (widget.item.value.isGroup) {
+      return;
+    }
+
+    final traceId = const UuidV4().generate();
+    final now = DateTime.now();
+
+    // Double click
+    if (_lastTapTime != null && now.difference(_lastTapTime!) <= _doubleClickThreshold) {
+      widget.controller.onItemExecuted?.call(traceId, widget.item.value);
+      widget.onItemTapped?.call();
+      _lastTapTime = null;
+      return;
+    }
+
+    // Single click
+    widget.controller.updateActiveIndex(traceId, widget.index);
+    widget.controller.onItemActive?.call(traceId, widget.item.value);
+
+    widget.onItemTapped?.call();
+
+    _lastTapTime = now;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _handleTapDown(),
+      child: widget.child,
     );
   }
 }

@@ -22,10 +22,17 @@ import (
 
 type uiImpl struct {
 	requestMap *util.HashMap[string, chan WebsocketMsg]
+	isVisible  bool // cached visibility state, updated by PostOnShow/PostOnHide
 }
 
 func (u *uiImpl) ChangeQuery(ctx context.Context, query common.PlainQuery) {
 	u.invokeWebsocketMethod(ctx, "ChangeQuery", query)
+}
+
+func (u *uiImpl) RefreshQuery(ctx context.Context, preserveSelectedIndex bool) {
+	u.invokeWebsocketMethod(ctx, "RefreshQuery", map[string]interface{}{
+		"preserveSelectedIndex": preserveSelectedIndex,
+	})
 }
 
 func (u *uiImpl) HideApp(ctx context.Context) {
@@ -94,7 +101,7 @@ func (u *uiImpl) Notify(ctx context.Context, msg common.NotifyMsg) {
 		logger.Info(ctx, "toolbar/system message muted by backend")
 		return
 	}
-	if u.isNotifyInToolbar(ctx, msg.PluginId) {
+	if u.IsVisible(ctx) {
 		u.invokeWebsocketMethod(ctx, "ShowToolbarMsg", msg)
 	} else {
 		notifier.Notify(msg.Text)
@@ -113,21 +120,33 @@ func (u *uiImpl) ReloadChatResources(ctx context.Context, resouceName string) {
 	u.invokeWebsocketMethod(ctx, "ReloadChatResources", resouceName)
 }
 
-func (u *uiImpl) UpdateResult(ctx context.Context, result common.UpdateableResult) {
-	u.invokeWebsocketMethod(ctx, "UpdateResult", result)
+func (u *uiImpl) UpdateResult(ctx context.Context, result interface{}) bool {
+	// Type assert to plugin.UpdatableResult
+	// We use interface{} in the signature to avoid circular dependency between common and plugin packages
+	response, err := u.invokeWebsocketMethod(ctx, "UpdateResult", result)
+	if err != nil {
+		logger.Error(ctx, fmt.Sprintf("UpdateResult error: %s", err.Error()))
+		return false
+	}
+
+	// The UI returns true if the result was found and updated, false otherwise
+	if response == nil {
+		return false
+	}
+
+	success, ok := response.(bool)
+	if !ok {
+		logger.Error(ctx, "UpdateResult response is not a boolean")
+		return false
+	}
+
+	return success
 }
 
-func (u *uiImpl) isNotifyInToolbar(ctx context.Context, pluginId string) bool {
-	isVisible, err := u.invokeWebsocketMethod(ctx, "IsVisible", nil)
-	if err != nil {
-		logger.Error(ctx, fmt.Sprintf("isNotifyInToolbar isVisible error: %s", err.Error()))
-		return false
-	}
-	if !isVisible.(bool) {
-		return false
-	}
-
-	return true
+func (u *uiImpl) IsVisible(ctx context.Context) bool {
+	// Return cached visibility state instead of querying UI via WebSocket
+	// The state is updated by PostOnShow/PostOnHide callbacks
+	return u.isVisible
 }
 
 func (u *uiImpl) PickFiles(ctx context.Context, params common.PickFilesParams) []string {
@@ -223,7 +242,8 @@ func getShowAppParams(ctx context.Context, showContext common.ShowContext) map[s
 		"AutoFocusToChatInput": showContext.AutoFocusToChatInput,
 		"Position":             position,
 		"QueryHistories":       setting.GetSettingManager().GetLatestQueryHistory(ctx, 10),
-		"QueryMode":            woxSetting.QueryMode.Get(),
+		"LaunchMode":           woxSetting.LaunchMode.Get(),
+		"StartPage":            woxSetting.StartPage.Get(),
 	}
 }
 
@@ -240,8 +260,6 @@ func onUIWebsocketRequest(ctx context.Context, request WebsocketMsg) {
 		handleWebsocketQuery(ctx, request)
 	case "Action":
 		handleWebsocketAction(ctx, request)
-	case "Refresh":
-		handleWebsocketRefresh(ctx, request)
 	}
 }
 
@@ -436,54 +454,6 @@ func handleWebsocketAction(ctx context.Context, request WebsocketMsg) {
 	}
 
 	responseUISuccess(ctx, request)
-}
-
-func handleWebsocketRefresh(ctx context.Context, request WebsocketMsg) {
-	resultStr, resultErr := getWebsocketMsgParameter(ctx, request, "refreshableResult")
-	if resultErr != nil {
-		logger.Error(ctx, resultErr.Error())
-		responseUIError(ctx, request, resultErr.Error())
-		return
-	}
-
-	queryId, queryIdErr := getWebsocketMsgParameter(ctx, request, "queryId")
-	if queryIdErr != nil {
-		logger.Error(ctx, queryIdErr.Error())
-		responseUIError(ctx, request, queryIdErr.Error())
-		return
-	}
-
-	var result plugin.RefreshableResultWithResultId
-	unmarshalErr := json.Unmarshal([]byte(resultStr), &result)
-	if unmarshalErr != nil {
-		logger.Error(ctx, unmarshalErr.Error())
-		responseUIError(ctx, request, unmarshalErr.Error())
-		return
-	}
-
-	startTime := util.GetSystemTimestamp()
-	logger.Debug(ctx, fmt.Sprintf("start executing refresh for result: %s (resultId:%s, queryId:%s)", result.Title, result.ResultId, queryId))
-
-	// replace remote preview with local preview
-	if result.Preview.PreviewType == plugin.WoxPreviewTypeRemote {
-		preview, err := plugin.GetPluginManager().GetResultPreview(util.NewTraceContext(), result.ResultId)
-		if err != nil {
-			logger.Error(ctx, err.Error())
-			responseUIError(ctx, request, err.Error())
-			return
-		}
-		result.Preview = preview
-	}
-
-	newResult, refreshErr := plugin.GetPluginManager().ExecuteRefresh(ctx, result)
-	logger.Debug(ctx, fmt.Sprintf("finished refresh %s, cost: %dms", result.ResultId, util.GetSystemTimestamp()-startTime))
-	if refreshErr != nil {
-		logger.Error(ctx, refreshErr.Error())
-		responseUIError(ctx, request, refreshErr.Error())
-		return
-	}
-
-	responseUISuccessWithData(ctx, request, newResult)
 }
 
 func getWebsocketMsgParameter(ctx context.Context, msg WebsocketMsg, key string) (string, error) {

@@ -219,3 +219,15 @@ class ChangeQueryParam:
             query_text=data.get("QueryText", ""),
             query_selection=Selection.from_json(data.get("QuerySelection", Selection().to_json())),
         )
+
+
+@dataclass
+class RefreshQueryParam:
+    """Parameters for refreshing a query"""
+
+    preserve_selected_index: bool = field(default=False)
+    """
+    Controls whether to maintain the previously selected item index after refresh.
+    When True, the user's current selection index in the results list is preserved.
+    When False, the selection resets to the first item (index 0).
+    """

@@ -62,6 +62,18 @@ func (e emptyAPIImpl) AIChatStream(ctx context.Context, model common.Model, conv
 func (e emptyAPIImpl) OnMRURestore(ctx context.Context, callback func(mruData plugin.MRUData) (*plugin.QueryResult, error)) {
 }
 
+func (e emptyAPIImpl) UpdateResult(ctx context.Context, result plugin.UpdatableResult) bool {
+	return false
+}
+
+func (e emptyAPIImpl) GetUpdatableResult(ctx context.Context, resultId string) *plugin.UpdatableResult {
+	return nil
+}
+
+func (e emptyAPIImpl) IsVisible(ctx context.Context) bool {
+	return false
+}
+
 func TestMacRetriever_ParseAppInfo(t *testing.T) {
 	if util.IsMacOS() {
 		util.GetLocation().Init()

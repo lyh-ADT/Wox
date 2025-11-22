@@ -1,21 +1,26 @@
 import asyncio
 import json
 import uuid
-from typing import Any, Dict, Callable, Optional
+from typing import Any, Callable, Dict, Optional
+
 import websockets
-from . import logger
 from wox_plugin import (
-    Context,
-    PublicAPI,
-    ChangeQueryParam,
-    MetadataCommand,
-    Conversation,
     AIModel,
+    ChangeQueryParam,
     ChatStreamCallback,
+    Context,
+    Conversation,
+    MetadataCommand,
     MRUData,
-    Result,
     PluginSettingDefinitionItem,
+    PublicAPI,
+    RefreshQueryParam,
+    Result,
+    UpdatableResult,
+    UpdatableResultAction,
 )
+
+from . import logger
 from .constants import PLUGIN_JSONRPC_TYPE_REQUEST
 from .plugin_manager import waiting_for_response
 
@@ -81,6 +86,11 @@ class PluginAPI(PublicAPI):
     async def show_app(self, ctx: Context) -> None:
         """Show the Wox window"""
         await self.invoke_method(ctx, "ShowApp", {})
+
+    async def is_visible(self, ctx: Context) -> bool:
+        """Check if Wox window is currently visible"""
+        result = await self.invoke_method(ctx, "IsVisible", {})
+        return bool(result) if result is not None else False
 
     async def notify(self, ctx: Context, message: str) -> None:
         """Show a notification message"""
@@ -164,3 +174,80 @@ class PluginAPI(PublicAPI):
         callback_id = str(uuid.uuid4())
         self.mru_restore_callbacks[callback_id] = callback
         await self.invoke_method(ctx, "OnMRURestore", {"callbackId": callback_id})
+
+    async def get_updatable_result(self, ctx: Context, result_id: str) -> Optional[UpdatableResult]:
+        """Get the current state of a result that is displayed in the UI"""
+        response = await self.invoke_method(ctx, "GetUpdatableResult", {"resultId": result_id})
+        if response is None:
+            return None
+
+        # Parse the response into UpdatableResult
+        # The response is a dict with optional fields
+        updatable_result = UpdatableResult(id=result_id)
+
+        if "Title" in response:
+            updatable_result.title = response["Title"]
+        if "SubTitle" in response:
+            updatable_result.sub_title = response["SubTitle"]
+        if "Tails" in response:
+            from wox_plugin import ResultTail
+
+            updatable_result.tails = [ResultTail.from_json(json.dumps(tail)) for tail in response["Tails"]]
+        if "Preview" in response:
+            from wox_plugin import WoxPreview
+
+            updatable_result.preview = WoxPreview.from_json(json.dumps(response["Preview"]))
+        if "Actions" in response:
+            from wox_plugin import ResultAction
+
+            actions = [ResultAction.from_json(json.dumps(action)) for action in response["Actions"]]
+            # Restore action callbacks from cache
+            from .plugin_manager import plugin_instances
+
+            plugin_instance = plugin_instances.get(self.plugin_id)
+            if plugin_instance:
+                for action in actions:
+                    if action.id in plugin_instance.actions:
+                        action.action = plugin_instance.actions[action.id]
+            updatable_result.actions = actions
+
+        return updatable_result
+
+    async def update_result(self, ctx: Context, result: UpdatableResult) -> bool:
+        """Update a query result that is currently displayed in the UI"""
+        # Cache action callbacks before serialization
+        if result.actions:
+            from .plugin_manager import plugin_instances
+
+            plugin_instance = plugin_instances.get(self.plugin_id)
+            if plugin_instance:
+                for action in result.actions:
+                    # Generate ID for actions that don't have one
+                    if not action.id:
+                        action.id = str(uuid.uuid4())
+
+                    if action.action is not None:
+                        plugin_instance.actions[action.id] = action.action
+
+        response = await self.invoke_method(ctx, "UpdateResult", {"result": json.loads(result.to_json())})
+        return bool(response) if response is not None else False
+
+    async def update_result_action(self, ctx: Context, action: "UpdatableResultAction") -> bool:
+        """Update a single action within a query result that is currently displayed in the UI"""
+        # Cache the action callback if present
+        if action.action is not None:
+            from .plugin_manager import plugin_instances
+
+            plugin_instance = plugin_instances.get(self.plugin_id)
+            if plugin_instance:
+                plugin_instance.actions[action.action_id] = action.action
+
+        response = await self.invoke_method(ctx, "UpdateResultAction", {"action": json.loads(action.to_json())})
+        return bool(response) if response is not None else False
+
+    async def refresh_query(self, ctx: Context, param: RefreshQueryParam) -> None:
+        """Re-execute the current query with the existing query text"""
+        params = {
+            "PreserveSelectedIndex": param.preserve_selected_index,
+        }
+        await self.invoke_method(ctx, "RefreshQuery", params)

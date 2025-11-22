@@ -17,20 +17,35 @@ class WoxQueryToolbarView extends GetView<WoxLauncherController> {
 
   bool get hasResultItems => controller.resultListViewController.items.isNotEmpty;
 
-  Widget leftPart() {
+  bool get hasLeftMessage {
+    final toolbarInfo = controller.toolbar.value;
+    return toolbarInfo.text != null && toolbarInfo.text!.isNotEmpty;
+  }
+
+  Widget leftPart(double maxLeftWidth) {
     if (LoggerSwitch.enablePaintLog) Logger.instance.debug(const UuidV4().generate(), "repaint: toolbar view - left part");
 
     return Obx(() {
       final toolbarInfo = controller.toolbar.value;
-      return Flexible(
+
+      // If no message, return empty widget
+      if (toolbarInfo.text == null || toolbarInfo.text!.isEmpty) {
+        return const SizedBox.shrink();
+      }
+
+      // Cap the left section width while allowing it to shrink to content size.
+      return ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxLeftWidth),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (toolbarInfo.icon != null)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: WoxImageView(woxImage: toolbarInfo.icon!, width: 24, height: 24),
               ),
-            Expanded(
+            // Text area flexes inside the capped max width and will ellipsize when needed
+            Flexible(
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final textSpan = TextSpan(
@@ -46,9 +61,9 @@ class WoxQueryToolbarView extends GetView<WoxLauncherController> {
                   final isTextOverflow = textPainter.didExceedMaxLines;
 
                   return Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const SizedBox(width: 0),
-                      Expanded(
+                      Flexible(
                         child: Text(
                           toolbarInfo.text ?? '',
                           style: TextStyle(color: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor)),
@@ -62,7 +77,6 @@ class WoxQueryToolbarView extends GetView<WoxLauncherController> {
                           child: GestureDetector(
                             onTap: () {
                               Clipboard.setData(ClipboardData(text: toolbarInfo.text ?? ''));
-                              // i18n: store key, render via tr
                               controller.toolbarCopyText.value = 'toolbar_copied';
                               Future.delayed(const Duration(seconds: 3), () {
                                 controller.toolbarCopyText.value = 'toolbar_copy';
@@ -141,6 +155,39 @@ class WoxQueryToolbarView extends GetView<WoxLauncherController> {
     });
   }
 
+  /// Calculate the precise width of a single action (name + hotkey + spacing)
+  double _calculateActionWidth(String actionName, HotkeyX hotkey) {
+    // Use TextPainter to precisely measure text width (works for all languages)
+    final textSpan = TextSpan(
+      text: actionName,
+      style: TextStyle(color: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor)),
+    );
+    final textPainter = TextPainter(
+      text: textSpan,
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final nameWidth = textPainter.width;
+
+    // Calculate hotkey width
+    double hotkeyWidth = 0;
+    if (hotkey.isNormalHotkey) {
+      // Each key is 28px wide, spacing between keys is 4px
+      final keyCount = (hotkey.normalHotkey!.modifiers?.length ?? 0) + 1;
+      hotkeyWidth = keyCount * 28.0 + (keyCount - 1) * 4.0;
+    } else if (hotkey.isDoubleHotkey) {
+      // Two keys, each 28px wide, 4px spacing
+      hotkeyWidth = 28.0 * 2 + 4.0;
+    } else if (hotkey.isSingleHotkey) {
+      // Single key, 28px wide
+      hotkeyWidth = 28.0;
+    }
+
+    // Total: name + 8px spacing + hotkey + 16px spacing between actions
+    return nameWidth + 8.0 + hotkeyWidth + 16.0;
+  }
+
   Widget rightPart() {
     if (LoggerSwitch.enablePaintLog) Logger.instance.debug(const UuidV4().generate(), "repaint: toolbar view  - right part");
 
@@ -152,40 +199,92 @@ class WoxQueryToolbarView extends GetView<WoxLauncherController> {
         return const SizedBox();
       }
 
-      List<Widget> actionWidgets = [];
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth;
 
-      for (var actionInfo in toolbarInfo.actions!) {
-        var hotkey = WoxHotkey.parseHotkeyFromString(actionInfo.hotkey);
-        if (hotkey != null) {
-          if (actionWidgets.isNotEmpty) {
-            actionWidgets.add(const SizedBox(width: 16));
+          // Parse all actions and calculate their widths
+          final actionData = <Map<String, dynamic>>[];
+          for (var actionInfo in toolbarInfo.actions!) {
+            var hotkey = WoxHotkey.parseHotkeyFromString(actionInfo.hotkey);
+            if (hotkey != null) {
+              final calculatedWidth = _calculateActionWidth(actionInfo.name, hotkey);
+              actionData.add({
+                'info': actionInfo,
+                'hotkey': hotkey,
+                'width': calculatedWidth,
+              });
+            }
           }
 
-          actionWidgets.add(
-            Text(
-              actionInfo.name,
-              style: TextStyle(color: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor)),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          );
-          actionWidgets.add(const SizedBox(width: 8));
-          actionWidgets.add(
-            WoxHotkeyView(
-              hotkey: hotkey,
-              backgroundColor: hasResultItems
-                  ? safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarBackgroundColor)
-                  : safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.appBackgroundColor).withValues(alpha: 0.1),
-              borderColor: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor),
-              textColor: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor),
-            ),
-          );
-        }
-      }
+          if (actionData.isEmpty) {
+            return const SizedBox();
+          }
 
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: actionWidgets,
+          // Determine how many actions to show from right to left
+          // Start from the rightmost action and work backwards
+          final actionsToShow = <Map<String, dynamic>>[];
+          double totalWidth = 0;
+
+          // Iterate from right to left (reverse order)
+          for (int i = actionData.length - 1; i >= 0; i--) {
+            final action = actionData[i];
+            final actionWidth = action['width'] as double;
+
+            // Check if adding this action would exceed available width
+            if (totalWidth + actionWidth <= availableWidth) {
+              actionsToShow.insert(0, action); // Insert at beginning to maintain order
+              totalWidth += actionWidth;
+            } else {
+              // No more space, stop adding actions
+              break;
+            }
+          }
+
+          // When there's a left message, ensure at least one action is shown (the rightmost one)
+          if (hasLeftMessage && actionsToShow.isEmpty && actionData.isNotEmpty) {
+            actionsToShow.add(actionData.last);
+          }
+
+          // Build widgets for the actions to show
+          List<Widget> actionWidgets = [];
+          for (var actionData in actionsToShow) {
+            final actionInfo = actionData['info'];
+            final hotkey = actionData['hotkey'] as HotkeyX;
+
+            if (actionWidgets.isNotEmpty) {
+              actionWidgets.add(const SizedBox(width: 16));
+            }
+
+            actionWidgets.add(
+              Text(
+                actionInfo.name,
+                style: TextStyle(color: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor)),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            );
+            actionWidgets.add(const SizedBox(width: 8));
+            actionWidgets.add(
+              WoxHotkeyView(
+                hotkey: hotkey,
+                backgroundColor: hasResultItems
+                    ? safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarBackgroundColor)
+                    : safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.appBackgroundColor).withValues(alpha: 0.1),
+                borderColor: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor),
+                textColor: safeFromCssColor(WoxThemeUtil.instance.currentTheme.value.toolbarFontColor),
+              ),
+            );
+          }
+
+          return Align(
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: actionWidgets,
+            ),
+          );
+        },
       );
     });
   }
@@ -212,13 +311,21 @@ class WoxQueryToolbarView extends GetView<WoxLauncherController> {
               left: WoxThemeUtil.instance.currentTheme.value.toolbarPaddingLeft.toDouble(),
               right: WoxThemeUtil.instance.currentTheme.value.toolbarPaddingRight.toDouble(),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                leftPart(),
-                const SizedBox(width: 16),
-                Expanded(child: rightPart()),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Limit left message to a max fraction so right side always has room
+                final double leftMaxWidth = constraints.maxWidth - 200 /* width of more actions hotkey */;
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Left part takes only the space it needs up to leftMaxWidth
+                    leftPart(leftMaxWidth),
+                    if (hasLeftMessage) const SizedBox(width: 16),
+                    // Right part fills remaining space and aligns content to the right
+                    Expanded(child: rightPart()),
+                  ],
+                );
+              },
             ),
           ),
         ),

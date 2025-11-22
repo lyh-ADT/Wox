@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:wox/components/wox_button.dart';
 import 'package:wox/components/wox_theme_icon_view.dart';
 import 'package:wox/components/wox_theme_preview.dart';
+import 'package:wox/components/wox_textfield.dart';
 import 'package:wox/entity/wox_theme.dart';
 import 'package:wox/controllers/wox_setting_controller.dart';
 import 'package:wox/utils/colors.dart';
@@ -16,25 +18,14 @@ class WoxSettingThemeView extends GetView<WoxSettingController> {
         Padding(
           padding: const EdgeInsets.only(bottom: 20),
           child: Obx(() {
-            return TextField(
+            return WoxTextField(
               autofocus: true,
-              style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-              decoration: InputDecoration(
-                hintText: Strings.format(controller.tr('ui_setting_theme_search_placeholder'), [controller.filteredThemeList.length]),
-                hintStyle: TextStyle(color: getThemeTextColor().withOpacity(0.5), fontSize: 13),
-                contentPadding: const EdgeInsets.all(10),
-                suffixIcon: Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: Icon(Icons.search, color: getThemeTextColor()),
-                ),
-                enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: getThemeTextColor().withOpacity(0.3)),
-                ),
-                focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: getThemeActiveBackgroundColor(), width: 2),
-                ),
+              hintText: Strings.format(controller.tr('ui_setting_theme_search_placeholder'), [controller.filteredThemeList.length]),
+              suffixIcon: Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: Icon(Icons.search, color: getThemeTextColor()),
               ),
-              onChanged: (value) => {controller.onFilterThemes(value)},
+              onChanged: (value) => controller.onFilterThemes(value),
             );
           }),
         ),
@@ -71,6 +62,7 @@ class WoxSettingThemeView extends GetView<WoxSettingController> {
                             controller.activeTheme.value = theme;
                           },
                           child: ListTile(
+                            contentPadding: const EdgeInsets.only(left: 6, right: 6),
                             leading: WoxThemeIconView(theme: theme, width: 32, height: 32),
                             title: Text(theme.themeName,
                                 maxLines: 1,
@@ -102,29 +94,9 @@ class WoxSettingThemeView extends GetView<WoxSettingController> {
                                     fontSize: 12,
                                   ),
                                 ),
-                                if (theme.isSystem) ...[
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(3),
-                                      border: Border.all(
-                                        color: isActive ? getThemeActionItemActiveColor() : getThemeSubTextColor(),
-                                        width: 0.5,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      controller.tr('ui_setting_theme_system_tag'),
-                                      style: TextStyle(
-                                        color: isActive ? getThemeActionItemActiveColor() : getThemeSubTextColor(),
-                                        fontSize: 11,
-                                        height: 1.1,
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ],
                             ),
+                            trailing: themeTrailIcon(theme, isActive),
                           ),
                         ),
                       );
@@ -137,6 +109,40 @@ class WoxSettingThemeView extends GetView<WoxSettingController> {
         ),
       ],
     );
+  }
+
+  Widget themeTrailIcon(WoxTheme theme, bool isActive) {
+    if (controller.isStoreThemeList.value) {
+      if (theme.isInstalled) {
+        return Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: Icon(Icons.check_circle, size: 20, color: isActive ? getThemeActionItemActiveColor() : Colors.green),
+        );
+      }
+    } else {
+      if (theme.isSystem) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(
+              color: isActive ? getThemeActionItemActiveColor() : getThemeSubTextColor(),
+              width: 0.5,
+            ),
+          ),
+          child: Text(
+            controller.tr('ui_setting_theme_system_tag'),
+            style: TextStyle(
+              color: isActive ? getThemeActionItemActiveColor() : getThemeSubTextColor(),
+              fontSize: 11,
+              height: 1.1,
+            ),
+          ),
+        );
+      }
+    }
+
+    return const SizedBox();
   }
 
   Widget themeDetail() {
@@ -197,29 +203,16 @@ class WoxSettingThemeView extends GetView<WoxSettingController> {
                 ),
                 Padding(
                   padding: const EdgeInsets.only(left: 18.0),
-                  child: TextButton(
+                  child: WoxButton.text(
+                    text: controller.tr('ui_setting_theme_website'),
+                    icon: Icon(
+                      Icons.open_in_new,
+                      size: 12,
+                      color: getThemeTextColor(),
+                    ),
                     onPressed: () {
                       controller.openPluginWebsite(theme.themeUrl);
                     },
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          controller.tr('ui_setting_theme_website'),
-                          style: TextStyle(
-                            color: getThemeTextColor(),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4.0),
-                          child: Icon(
-                            Icons.open_in_new,
-                            size: 12,
-                            color: getThemeTextColor(),
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ],
@@ -232,45 +225,33 @@ class WoxSettingThemeView extends GetView<WoxSettingController> {
                 if (!theme.isInstalled)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      style: ButtonStyle(
-                        backgroundColor: WidgetStateProperty.all(getThemeActiveBackgroundColor()),
-                        foregroundColor: WidgetStateProperty.all(getThemeActionItemActiveColor()),
-                      ),
+                    child: WoxButton.primary(
+                      text: controller.tr('ui_setting_theme_install'),
                       onPressed: () {
                         controller.installTheme(theme);
                       },
-                      child: Text(controller.tr('ui_setting_theme_install')),
                     ),
                   ),
                 if (theme.isInstalled || theme.isSystem)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      style: ButtonStyle(
-                        backgroundColor: WidgetStateProperty.all(getThemeActiveBackgroundColor()),
-                        foregroundColor: WidgetStateProperty.all(getThemeActionItemActiveColor()),
-                      ),
+                    child: WoxButton.primary(
+                      text: controller.tr('ui_setting_theme_apply'),
                       onPressed: controller.woxSetting.value.themeId == theme.themeId
                           ? null
                           : () {
                               controller.applyTheme(theme);
                             },
-                      child: Text(controller.tr('ui_setting_theme_apply')),
                     ),
                   ),
                 if (theme.isInstalled && !theme.isSystem)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      style: ButtonStyle(
-                        backgroundColor: WidgetStateProperty.all(getThemeActiveBackgroundColor()),
-                        foregroundColor: WidgetStateProperty.all(getThemeActionItemActiveColor()),
-                      ),
+                    child: WoxButton.primary(
+                      text: controller.tr('ui_setting_theme_uninstall'),
                       onPressed: () {
                         controller.uninstallTheme(theme);
                       },
-                      child: Text(controller.tr('ui_setting_theme_uninstall')),
                     ),
                   ),
               ],

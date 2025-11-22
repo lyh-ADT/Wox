@@ -17,6 +17,7 @@ import 'package:uuid/v4.dart';
 import 'package:wox/components/wox_image_view.dart';
 import 'package:wox/components/wox_ai_chat_view.dart';
 import 'package:wox/components/wox_markdown.dart';
+import 'package:wox/components/wox_plugin_detail_view.dart';
 import 'package:wox/controllers/wox_ai_chat_controller.dart';
 import 'package:wox/controllers/wox_launcher_controller.dart';
 import 'package:wox/entity/wox_ai.dart';
@@ -53,13 +54,7 @@ class _WoxPreviewViewState extends State<WoxPreviewView> {
   };
 
   Widget scrollableContent({required Widget child}) {
-    return Scrollbar(
-      controller: scrollController,
-      child: SingleChildScrollView(
-        controller: scrollController,
-        child: child,
-      ),
-    );
+    return child;
   }
 
   Widget buildMarkdown(String markdownData) {
@@ -102,19 +97,16 @@ class _WoxPreviewViewState extends State<WoxPreviewView> {
         if (snapshot.hasData) {
           return CodeTheme(
             data: CodeThemeData(styles: monokaiTheme),
-            child: Scrollbar(
+            child: SingleChildScrollView(
               controller: scrollController,
-              child: SingleChildScrollView(
-                controller: scrollController,
-                child: CodeField(
-                  textStyle: const TextStyle(fontSize: 13),
+              child: CodeField(
+                textStyle: const TextStyle(fontSize: 13),
+                readOnly: true,
+                gutterStyle: GutterStyle.none,
+                controller: CodeController(
+                  text: snapshot.data,
                   readOnly: true,
-                  gutterStyle: GutterStyle.none,
-                  controller: CodeController(
-                    text: snapshot.data,
-                    readOnly: true,
-                    language: allCodeLanguages[fileExtension]!,
-                  ),
+                  language: allCodeLanguages[fileExtension]!,
                 ),
               ),
             ),
@@ -196,6 +188,8 @@ class _WoxPreviewViewState extends State<WoxPreviewView> {
           child: WoxImageView(woxImage: parsedWoxImage),
         );
       }
+    } else if (widget.woxPreview.previewType == WoxPreviewTypeEnum.WOX_PREVIEW_TYPE_PLUGIN_DETAIL.code) {
+      contentWidget = WoxPluginDetailView(pluginDetailJson: widget.woxPreview.previewData);
     } else if (widget.woxPreview.previewType == WoxPreviewTypeEnum.WOX_PREVIEW_TYPE_CHAT.code) {
       var previewChatData = WoxAIChatData.fromJson(jsonDecode(widget.woxPreview.previewData));
       var chatController = Get.find<WoxAIChatController>();
@@ -208,7 +202,18 @@ class _WoxPreviewViewState extends State<WoxPreviewView> {
         launcherController.hasPendingAutoFocusToChatInput = false;
       }
 
-      contentWidget = const WoxAIChatView();
+      // Handle scroll position for chat view
+      if (widget.woxPreview.scrollPosition == WoxPreviewScrollPositionEnum.WOX_PREVIEW_SCROLL_POSITION_BOTTOM.code) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          chatController.scrollToBottomOfAiChat();
+        });
+      }
+
+      // Chat view has its own layout structure with Expanded widgets, return it directly
+      return Container(
+        padding: const EdgeInsets.only(top: 10.0, bottom: 10.0, left: 10.0),
+        child: const WoxAIChatView(),
+      );
     }
 
     if (widget.woxPreview.scrollPosition == WoxPreviewScrollPositionEnum.WOX_PREVIEW_SCROLL_POSITION_BOTTOM.code) {
@@ -220,49 +225,62 @@ class _WoxPreviewViewState extends State<WoxPreviewView> {
     }
 
     return Container(
-      padding: const EdgeInsets.all(10.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Theme(
-              data: ThemeData(
-                textSelectionTheme: TextSelectionThemeData(
-                  selectionColor: safeFromCssColor(widget.woxTheme.previewTextSelectionColor),
+        padding: const EdgeInsets.only(top: 10.0, bottom: 10.0, left: 10.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Scrollbar(
+                thumbVisibility: true,
+                controller: scrollController,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      controller: scrollController,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                        child: Theme(
+                          data: ThemeData(
+                            textSelectionTheme: TextSelectionThemeData(
+                              selectionColor: safeFromCssColor(widget.woxTheme.previewTextSelectionColor),
+                            ),
+                          ),
+                          child: contentWidget,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
-              child: contentWidget,
             ),
-          ),
-          //show previewProperties
-          if (widget.woxPreview.previewProperties.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.only(top: 10.0),
-              child: Column(
-                children: [
-                  ...widget.woxPreview.previewProperties.entries.map((e) => Column(
-                        children: [
-                          Divider(color: safeFromCssColor(widget.woxTheme.previewSplitLineColor)),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 80),
-                                child: Text(e.key, overflow: TextOverflow.ellipsis, style: TextStyle(color: safeFromCssColor(widget.woxTheme.previewPropertyTitleColor))),
-                              ),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 260),
-                                child: Text(e.value, overflow: TextOverflow.ellipsis, style: TextStyle(color: safeFromCssColor(widget.woxTheme.previewPropertyContentColor))),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ))
-                ],
+            //show previewProperties
+            if (widget.woxPreview.previewProperties.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.only(top: 10.0, right: 10.0),
+                child: Column(
+                  children: [
+                    ...widget.woxPreview.previewProperties.entries.map((e) => Column(
+                          children: [
+                            Divider(color: safeFromCssColor(widget.woxTheme.previewSplitLineColor)),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 80),
+                                  child: Text(e.key, overflow: TextOverflow.ellipsis, style: TextStyle(color: safeFromCssColor(widget.woxTheme.previewPropertyTitleColor))),
+                                ),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 260),
+                                  child: Text(e.value, overflow: TextOverflow.ellipsis, style: TextStyle(color: safeFromCssColor(widget.woxTheme.previewPropertyContentColor))),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ))
+                  ],
+                ),
               ),
-            ),
-        ],
-      ),
-    );
+          ],
+        ));
   }
 }

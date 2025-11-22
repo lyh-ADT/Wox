@@ -143,7 +143,12 @@ func handlePluginStore(w http.ResponseWriter, r *http.Request) {
 		pluginInstance, isInstalled := lo.Find(plugin.GetPluginManager().GetPluginInstances(), func(item *plugin.Instance) bool {
 			return item.Metadata.Id == storePlugin.Id
 		})
-		plugins[i].Icon = common.NewWoxImageUrl(manifests[i].IconUrl)
+		// Support both IconUrl and IconEmoji, prefer IconEmoji if both are present
+		if manifests[i].IconEmoji != "" {
+			plugins[i].Icon = common.NewWoxImageEmoji(manifests[i].IconEmoji)
+		} else if manifests[i].IconUrl != "" {
+			plugins[i].Icon = common.NewWoxImageUrl(manifests[i].IconUrl)
+		}
 		plugins[i].IsInstalled = isInstalled
 		plugins[i] = convertPluginDto(getCtx, plugins[i], pluginInstance)
 	}
@@ -470,7 +475,8 @@ func handleSettingWox(w http.ResponseWriter, r *http.Request) {
 	settingDto.LangCode = woxSetting.LangCode.Get()
 	settingDto.QueryHotkeys = woxSetting.QueryHotkeys.Get()
 	settingDto.QueryShortcuts = woxSetting.QueryShortcuts.Get()
-	settingDto.QueryMode = woxSetting.QueryMode.Get()
+	settingDto.LaunchMode = woxSetting.LaunchMode.Get()
+	settingDto.StartPage = woxSetting.StartPage.Get()
 	settingDto.AIProviders = woxSetting.AIProviders.Get()
 	settingDto.HttpProxyEnabled = woxSetting.HttpProxyEnabled.Get()
 	settingDto.HttpProxyUrl = woxSetting.HttpProxyUrl.Get()
@@ -547,8 +553,10 @@ func handleSettingWoxUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		woxSetting.QueryShortcuts.Set(queryShortcuts)
-	case "QueryMode":
-		woxSetting.QueryMode.Set(vs)
+	case "LaunchMode":
+		woxSetting.LaunchMode.Set(setting.LaunchMode(vs))
+	case "StartPage":
+		woxSetting.StartPage.Set(setting.StartPage(vs))
 	case "ShowPosition":
 		woxSetting.ShowPosition.Set(setting.PositionType(vs))
 	case "AIProviders":
@@ -835,23 +843,7 @@ func handleOnQueryBoxFocus(w http.ResponseWriter, r *http.Request) {
 
 func handleOnHide(w http.ResponseWriter, r *http.Request) {
 	ctx := util.NewTraceContext()
-
-	body, _ := io.ReadAll(r.Body)
-	queryResult := gjson.GetBytes(body, "query")
-	if !queryResult.Exists() {
-		writeErrorResponse(w, "query is empty")
-		return
-	}
-
-	var plainQuery common.PlainQuery
-	unmarshalErr := json.Unmarshal([]byte(queryResult.String()), &plainQuery)
-	if unmarshalErr != nil {
-		logger.Error(ctx, unmarshalErr.Error())
-		writeErrorResponse(w, unmarshalErr.Error())
-		return
-	}
-
-	GetUIManager().PostOnHide(ctx, plainQuery)
+	GetUIManager().PostOnHide(ctx)
 	writeSuccessResponse(w, "")
 }
 

@@ -3,6 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:wox/api/wox_api.dart';
+import 'package:wox/components/wox_button.dart';
+import 'package:wox/components/wox_dropdown_button.dart';
+import 'package:wox/components/wox_textfield.dart';
+
 import 'package:wox/controllers/wox_setting_controller.dart';
 import 'package:wox/entity/wox_ai.dart';
 import 'package:wox/utils/colors.dart';
@@ -144,11 +148,8 @@ class _WoxAIModelSelectorViewState extends State<WoxAIModelSelectorView> {
               ),
             ),
             const SizedBox(width: 12),
-            TextButton(
-              child: Text(
-                tr('ui_ai_model_selector_open_ai_settings'),
-                style: TextStyle(color: getThemeTextColor(), fontWeight: FontWeight.w600),
-              ),
+            WoxButton.text(
+              text: tr('ui_ai_model_selector_open_ai_settings'),
               onPressed: () {
                 // Switch to the AI settings page within the settings view
                 Get.find<WoxSettingController>().activeNavPath.value = 'ai';
@@ -174,21 +175,13 @@ class _WoxAIModelSelectorViewState extends State<WoxAIModelSelectorView> {
         // Provider selector
         Expanded(
           flex: 1,
-          child: DropdownButton<String>(
+          child: WoxDropdownButton<String>(
             value: _selectedProvider,
             isExpanded: true,
-            dropdownColor: getThemeCardBackgroundColor(),
-            style: TextStyle(color: getThemeTextColor(), fontSize: 13),
             items: _providers
-                .map((provider) => DropdownMenuItem<String>(
+                .map((provider) => WoxDropdownItem<String>(
                       value: provider,
-                      child: SizedBox(
-                        width: 100, // Limit width to prevent overflow
-                        child: Text(
-                          provider,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+                      label: provider,
                     ))
                 .toList(),
             onChanged: (provider) {
@@ -217,19 +210,10 @@ class _WoxAIModelSelectorViewState extends State<WoxAIModelSelectorView> {
         Expanded(
           flex: 2,
           child: _isEditMode
-              ? TextField(
+              ? WoxTextField(
                   controller: _nameController,
-                  style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-                  decoration: InputDecoration(
-                    hintText: tr('ui_ai_model_selector_model_name'),
-                    hintStyle: TextStyle(color: getThemeSubTextColor()),
-                    enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: getThemeTextColor().withOpacity(0.3)),
-                    ),
-                    focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: getThemeActiveBackgroundColor(), width: 2),
-                    ),
-                  ),
+                  hintText: tr('ui_ai_model_selector_model_name'),
+                  width: double.infinity, // fill the Expanded width
                   onChanged: (value) {
                     if (value.isNotEmpty && _selectedProvider != null) {
                       final updatedModel = AIModel(
@@ -241,21 +225,14 @@ class _WoxAIModelSelectorViewState extends State<WoxAIModelSelectorView> {
                     }
                   },
                 )
-              : DropdownButton<String>(
+              : WoxDropdownButton<String>(
                   value: _selectedModel?.name,
                   isExpanded: true,
-                  dropdownColor: getThemeCardBackgroundColor(),
-                  style: TextStyle(color: getThemeTextColor(), fontSize: 13),
+                  enableFilter: true,
                   items: getProviderModels()
-                      .map((model) => DropdownMenuItem<String>(
+                      .map((model) => WoxDropdownItem<String>(
                             value: model.name,
-                            child: SizedBox(
-                              width: 200, // Limit width to prevent overflow
-                              child: Text(
-                                model.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
+                            label: model.name,
                           ))
                       .toList(),
                   onChanged: (modelName) {

@@ -2,17 +2,17 @@ import 'dart:convert';
 
 import 'package:dynamic_tabbar/dynamic_tabbar.dart' as dt;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_image_slideshow/flutter_image_slideshow.dart';
 import 'package:get/get.dart';
 import 'package:uuid/v4.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_head_view.dart';
+import 'package:wox/components/wox_plugin_detail_view.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_label_view.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_newline_view.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_select_ai_model_view.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_select_view.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_table_view.dart';
 import 'package:wox/components/wox_image_view.dart';
+import 'package:wox/components/wox_textfield.dart';
 import 'package:wox/controllers/wox_setting_controller.dart';
 import 'package:wox/entity/setting/wox_plugin_setting_label.dart';
 import 'package:wox/entity/setting/wox_plugin_setting_select_ai_model.dart';
@@ -25,6 +25,7 @@ import 'package:wox/entity/setting/wox_plugin_setting_select.dart';
 import 'package:wox/entity/setting/wox_plugin_setting_textbox.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_checkbox_view.dart';
 import 'package:wox/components/plugin/wox_setting_plugin_textbox_view.dart';
+import 'package:wox/components/wox_button.dart';
 import 'package:wox/utils/colors.dart';
 import 'package:wox/utils/strings.dart';
 import 'package:wox/enums/wox_plugin_runtime_enum.dart';
@@ -40,70 +41,60 @@ class WoxSettingPluginView extends GetView<WoxSettingController> {
         Padding(
           padding: const EdgeInsets.only(bottom: 20),
           child: Obx(() {
-            return TextField(
+            return WoxTextField(
               autofocus: true,
               controller: controller.filterPluginKeywordController,
-              style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-              decoration: InputDecoration(
-                hintText: Strings.format(controller.tr('ui_search_plugins'), [controller.filteredPluginList.length]),
-                hintStyle: TextStyle(color: getThemeTextColor().withOpacity(0.5), fontSize: 13),
-                contentPadding: const EdgeInsets.all(10),
-                enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: getThemeTextColor().withOpacity(0.3)),
-                ),
-                focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: getThemeActiveBackgroundColor(), width: 2),
-                ),
-                suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Obx(() {
-                      if (_refreshing.value) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 4.0),
-                          child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                        );
-                      }
-                      return GestureDetector(
-                        onTap: () async {
-                          _refreshing.value = true;
-                          try {
-                            final traceId = const UuidV4().generate();
-                            final preserveKeyword = controller.filterPluginKeywordController.text;
-                            final preserveActiveId = controller.activePlugin.value.id;
-                            final isStore = controller.isStorePluginList.value;
-
-                            if (isStore) {
-                              await controller.loadStorePlugins(traceId);
-                              await controller.switchToPluginList(traceId, true);
-                            } else {
-                              await controller.loadInstalledPlugins(traceId);
-                              await controller.switchToPluginList(traceId, false);
-                            }
-
-                            // restore filter keyword and re-filter
-                            controller.filterPluginKeywordController.text = preserveKeyword;
-                            controller.filterPlugins();
-
-                            // try restore previous active selection if still present
-                            final idx = controller.filteredPluginList.indexWhere((p) => p.id == preserveActiveId);
-                            if (idx >= 0) {
-                              controller.activePlugin.value = controller.filteredPluginList[idx];
-                            } else {
-                              controller.setFirstFilteredPluginDetailActive();
-                            }
-                          } finally {
-                            _refreshing.value = false;
-                          }
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                          child: Icon(Icons.refresh, color: getThemeSubTextColor()),
-                        ),
+              hintText: Strings.format(controller.tr('ui_search_plugins'), [controller.filteredPluginList.length]),
+              contentPadding: const EdgeInsets.all(10),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Obx(() {
+                    if (_refreshing.value) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 4.0),
+                        child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                       );
-                    }),
-                  ],
-                ),
+                    }
+                    return GestureDetector(
+                      onTap: () async {
+                        _refreshing.value = true;
+                        try {
+                          final traceId = const UuidV4().generate();
+                          final preserveKeyword = controller.filterPluginKeywordController.text;
+                          final preserveActiveId = controller.activePlugin.value.id;
+                          final isStore = controller.isStorePluginList.value;
+
+                          if (isStore) {
+                            await controller.loadStorePlugins(traceId);
+                            await controller.switchToPluginList(traceId, true);
+                          } else {
+                            await controller.loadInstalledPlugins(traceId);
+                            await controller.switchToPluginList(traceId, false);
+                          }
+
+                          // restore filter keyword and re-filter
+                          controller.filterPluginKeywordController.text = preserveKeyword;
+                          controller.filterPlugins();
+
+                          // try restore previous active selection if still present
+                          final idx = controller.filteredPluginList.indexWhere((p) => p.id == preserveActiveId);
+                          if (idx >= 0) {
+                            controller.activePlugin.value = controller.filteredPluginList[idx];
+                          } else {
+                            controller.setFirstFilteredPluginDetailActive();
+                          }
+                        } finally {
+                          _refreshing.value = false;
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        child: Icon(Icons.refresh, color: getThemeSubTextColor()),
+                      ),
+                    );
+                  }),
+                ],
               ),
               onChanged: (value) {
                 controller.filterPlugins();
@@ -147,7 +138,7 @@ class WoxSettingPluginView extends GetView<WoxSettingController> {
                             controller.activePlugin.value = plugin;
                           },
                           child: ListTile(
-                            contentPadding: const EdgeInsets.only(left: 6, right: 0),
+                            contentPadding: const EdgeInsets.only(left: 6, right: 6),
                             leading: WoxImageView(woxImage: plugin.icon, width: 32),
                             title: Text(plugin.name,
                                 maxLines: 1,
@@ -238,8 +229,8 @@ class WoxSettingPluginView extends GetView<WoxSettingController> {
     // Store list: show installed check icon
     if (controller.isStorePluginList.value && plugin.isInstalled) {
       rightItems.add(Padding(
-        padding: const EdgeInsets.only(left: 8.0),
-        child: Icon(Icons.check_circle, color: isActive ? getThemeActionItemActiveColor() : Colors.green),
+        padding: const EdgeInsets.only(right: 6),
+        child: Icon(Icons.check_circle, size: 20, color: isActive ? getThemeActionItemActiveColor() : Colors.green),
       ));
     }
 
@@ -326,28 +317,16 @@ class WoxSettingPluginView extends GetView<WoxSettingController> {
                 ),
                 Padding(
                   padding: const EdgeInsets.only(left: 18.0),
-                  child: TextButton(
+                  child: WoxButton.text(
+                    text: controller.tr('ui_plugin_website'),
+                    icon: Icon(
+                      Icons.open_in_new,
+                      size: 12,
+                      color: getThemeTextColor(),
+                    ),
                     onPressed: () {
                       controller.openPluginWebsite(plugin.website);
                     },
-                    child: Row(
-                      children: [
-                        Text(
-                          controller.tr('ui_plugin_website'),
-                          style: TextStyle(
-                            color: getThemeTextColor(),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4.0),
-                          child: Icon(
-                            Icons.open_in_new,
-                            size: 12,
-                            color: getThemeTextColor(),
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ],
@@ -360,71 +339,50 @@ class WoxSettingPluginView extends GetView<WoxSettingController> {
                 if (plugin.isInstalled && !plugin.isSystem)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      style: ButtonStyle(
-                        backgroundColor: WidgetStateProperty.all(getThemeActiveBackgroundColor()),
-                        foregroundColor: WidgetStateProperty.all(getThemeActionItemActiveColor()),
-                      ),
+                    child: WoxButton.secondary(
+                      text: controller.tr('ui_plugin_uninstall'),
                       onPressed: () {
                         controller.uninstallPlugin(plugin);
                       },
-                      child: Text(controller.tr('ui_plugin_uninstall')),
                     ),
                   ),
                 if (!plugin.isInstalled)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
-                    child: Obx(() => ElevatedButton(
-                          style: ButtonStyle(
-                            backgroundColor: WidgetStateProperty.all(getThemeActiveBackgroundColor()),
-                            foregroundColor: WidgetStateProperty.all(getThemeActionItemActiveColor()),
-                          ),
+                    child: Obx(() => WoxButton.secondary(
+                          text: controller.isInstallingPlugin.value ? controller.tr("ui_plugin_installing") : controller.tr('ui_plugin_install'),
+                          icon: controller.isInstallingPlugin.value
+                              ? SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: getThemeActionItemActiveColor()),
+                                )
+                              : null,
                           onPressed: controller.isInstallingPlugin.value
                               ? null
                               : () {
                                   controller.installPlugin(plugin);
                                 },
-                          child: controller.isInstallingPlugin.value
-                              ? Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: getThemeActionItemActiveColor()),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(controller.tr("ui_plugin_installing")),
-                                  ],
-                                )
-                              : Text(controller.tr('ui_plugin_install')),
                         )),
                   ),
                 if (plugin.isInstalled && !plugin.isDisable)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      style: ButtonStyle(
-                        backgroundColor: WidgetStateProperty.all(getThemeActiveBackgroundColor()),
-                        foregroundColor: WidgetStateProperty.all(getThemeActionItemActiveColor()),
-                      ),
+                    child: WoxButton.secondary(
+                      text: controller.tr('ui_plugin_disable'),
                       onPressed: () {
                         controller.disablePlugin(plugin);
                       },
-                      child: Text(controller.tr('ui_plugin_disable')),
                     ),
                   ),
                 if (plugin.isInstalled && plugin.isDisable)
                   Padding(
                     padding: const EdgeInsets.only(right: 8.0),
-                    child: ElevatedButton(
-                      style: ButtonStyle(
-                        backgroundColor: WidgetStateProperty.all(getThemeActiveBackgroundColor()),
-                        foregroundColor: WidgetStateProperty.all(getThemeActionItemActiveColor()),
-                      ),
+                    child: WoxButton.secondary(
+                      text: controller.tr('ui_plugin_enable'),
                       onPressed: () {
                         controller.enablePlugin(plugin);
                       },
-                      child: Text(controller.tr('ui_plugin_enable')),
                     ),
                   ),
               ],
@@ -442,44 +400,75 @@ class WoxSettingPluginView extends GetView<WoxSettingController> {
               labelColor: getThemeTextColor(),
               unselectedLabelColor: getThemeTextColor(),
               indicatorColor: getThemeActiveBackgroundColor(),
-              dynamicTabs: [
-                if (controller.shouldShowSettingTab())
-                  dt.TabData(
-                    index: 0,
-                    title: Tab(
-                      child: Text(controller.tr('ui_plugin_tab_settings'), style: TextStyle(color: getThemeTextColor())),
-                    ),
-                    content: pluginTabSetting(),
-                  ),
-                dt.TabData(
-                  index: 1,
-                  title: Tab(
-                    child: Text(controller.tr('ui_plugin_tab_trigger_keywords'), style: TextStyle(color: getThemeTextColor())),
-                  ),
-                  content: pluginTabTriggerKeywords(),
-                ),
-                dt.TabData(
-                  index: 2,
-                  title: Tab(
-                    child: Text(controller.tr('ui_plugin_tab_commands'), style: TextStyle(color: getThemeTextColor())),
-                  ),
-                  content: pluginTabCommand(),
-                ),
-                dt.TabData(
-                  index: 3,
-                  title: Tab(
-                    child: Text(controller.tr('ui_plugin_tab_description'), style: TextStyle(color: getThemeTextColor())),
-                  ),
-                  content: pluginTabDescription(),
-                ),
-                dt.TabData(
-                  index: 4,
-                  title: Tab(
-                    child: Text(controller.tr('ui_plugin_tab_privacy'), style: TextStyle(color: getThemeTextColor())),
-                  ),
-                  content: pluginTabPrivacy(),
-                ),
-              ],
+              dynamicTabs: controller.activeNavPath.value == 'plugins.installed'
+                  ? [
+                      dt.TabData(
+                        index: 0,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_settings'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabSetting(),
+                      ),
+                      dt.TabData(
+                        index: 1,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_trigger_keywords'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabTriggerKeywords(),
+                      ),
+                      dt.TabData(
+                        index: 2,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_commands'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabCommand(),
+                      ),
+                      dt.TabData(
+                        index: 3,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_description'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabDescription(),
+                      ),
+                      dt.TabData(
+                        index: 4,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_privacy'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabPrivacy(),
+                      ),
+                    ]
+                  : [
+                      // For uninstalled plugins: Description tab first
+                      dt.TabData(
+                        index: 0,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_description'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabDescription(),
+                      ),
+                      dt.TabData(
+                        index: 1,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_trigger_keywords'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabTriggerKeywords(),
+                      ),
+                      dt.TabData(
+                        index: 2,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_commands'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabCommand(),
+                      ),
+                      dt.TabData(
+                        index: 3,
+                        title: Tab(
+                          child: Text(controller.tr('ui_plugin_tab_privacy'), style: TextStyle(color: getThemeTextColor())),
+                        ),
+                        content: pluginTabPrivacy(),
+                      ),
+                    ],
               onTabControllerUpdated: (tabController) {
                 controller.activePluginTabController = tabController;
                 tabController.index = 0;
@@ -493,34 +482,40 @@ class WoxSettingPluginView extends GetView<WoxSettingController> {
   }
 
   Widget pluginTabDescription() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            controller.activePlugin.value.description,
-            style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-          ),
-          const SizedBox(height: 20),
-          controller.activePlugin.value.screenshotUrls.isNotEmpty
-              ? ImageSlideshow(
-                  width: double.infinity,
-                  height: 400,
-                  indicatorColor: getThemeActiveBackgroundColor(),
-                  children: [
-                    ...controller.activePlugin.value.screenshotUrls.map((e) => Image.network(e)),
-                  ],
-                )
-              : const SizedBox(),
-        ],
-      ),
+    // Convert PluginDetail to JSON format expected by WoxPluginDetailView
+    final pluginData = {
+      'Id': controller.activePlugin.value.id,
+      'Name': controller.activePlugin.value.name,
+      'Description': controller.activePlugin.value.description,
+      'Author': controller.activePlugin.value.author,
+      'Version': controller.activePlugin.value.version,
+      'Website': controller.activePlugin.value.website,
+      'Runtime': controller.activePlugin.value.runtime,
+      'ScreenshotUrls': controller.activePlugin.value.screenshotUrls,
+    };
+
+    return WoxPluginDetailView(
+      pluginDetailJson: jsonEncode(pluginData),
     );
   }
 
   Widget pluginTabSetting() {
     return Obx(() {
       var plugin = controller.activePlugin.value;
+
+      // Show empty state if no settings
+      if (plugin.settingDefinitions.isEmpty) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(controller.tr('ui_plugin_no_settings'), style: TextStyle(color: getThemeTextColor())),
+            ],
+          ),
+        );
+      }
+
       return Padding(
         padding: const EdgeInsets.all(16.0),
         child: SingleChildScrollView(

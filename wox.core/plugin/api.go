@@ -41,6 +41,116 @@ type API interface {
 	OnMRURestore(ctx context.Context, callback func(mruData MRUData) (*QueryResult, error))
 	RegisterQueryCommands(ctx context.Context, commands []MetadataCommand)
 	AIChatStream(ctx context.Context, model common.Model, conversations []common.Conversation, options common.ChatOptions, callback common.ChatStreamFunc) error
+
+	// GetUpdatableResult retrieves the current state of a result from the result cache.
+	// Returns nil if the result is not found (no longer visible in UI).
+	// Returns a pointer to UpdatableResult containing the current state if found.
+	//
+	// The returned UpdatableResult can be modified and passed to UpdateResult() to update the UI.
+	//
+	// Example - Toggle favorite state:
+	//   Action: func(ctx context.Context, actionContext ActionContext) {
+	//       // Get current result state
+	//       updatableResult := api.GetUpdatableResult(ctx, actionContext.ResultId)
+	//       if updatableResult == nil {
+	//           return // Result no longer visible
+	//       }
+	//
+	//       // Toggle favorite
+	//       if isFavorite {
+	//           removeFavorite()
+	//           // Update action name and icon
+	//           (*updatableResult.Actions)[actionIndex].Name = "Add to favorite"
+	//           (*updatableResult.Actions)[actionIndex].Icon = AddToFavIcon
+	//           // Remove favorite tail
+	//           *updatableResult.Tails = removeMatchingTail(*updatableResult.Tails, favoriteTail)
+	//       } else {
+	//           addFavorite()
+	//           // Update action name and icon
+	//           (*updatableResult.Actions)[actionIndex].Name = "Remove from favorite"
+	//           (*updatableResult.Actions)[actionIndex].Icon = RemoveFromFavIcon
+	//           // Add favorite tail
+	//           *updatableResult.Tails = append(*updatableResult.Tails, favoriteTail)
+	//       }
+	//
+	//       // Update the result
+	//       api.UpdateResult(ctx, *updatableResult)
+	//   }
+	GetUpdatableResult(ctx context.Context, resultId string) *UpdatableResult
+
+	// UpdateResult updates a query result that is currently displayed in the UI.
+	//
+	// This method is designed for showing real-time progress updates during long-running operations,
+	// such as file downloads, plugin installations, or API calls. It directly pushes updates to the UI
+	// without polling, making it ideal for one-time or event-driven updates.
+	//
+	// Returns:
+	//   - true: The result was successfully updated (still visible in the UI)
+	//   - false: The result is no longer visible in the UI (caller should stop updating)
+	//
+	// When to use UpdateResult:
+	//   - Progress updates during Action execution (e.g., "Downloading... 50%")
+	//   - One-time status updates (e.g., "Installation complete")
+	//   - Event-driven updates with clear start/end (e.g., file change notifications)
+	//   - Periodic updates (e.g., CPU/memory monitoring) - start a timer in Init() and track result IDs
+	//
+	// Best practices:
+	//   - Set PreventHideAfterAction: true in your action to keep the result visible
+	//   - Only call this within Action handlers or background goroutines spawned by actions
+	//   - Check the return value - if false, stop updating to avoid resource leaks
+	//   - Only update fields that have changed (use nil for fields you don't want to update)
+	//
+	// Example:
+	//   Action: func(ctx context.Context, actionContext ActionContext) {
+	//       title := "Installing..."
+	//       api.UpdateResult(ctx, UpdatableResult{Id: actionContext.ResultId, Title: &title})
+	//
+	//       go func() {
+	//           title := "Downloading..."
+	//           if !api.UpdateResult(ctx, UpdatableResult{Id: actionContext.ResultId, Title: &title}) {
+	//               return // Result no longer visible, stop updating
+	//           }
+	//           // ... perform download ...
+	//           title = "Installation complete"
+	//           api.UpdateResult(ctx, UpdatableResult{Id: actionContext.ResultId, Title: &title})
+	//       }()
+	//   }
+	UpdateResult(ctx context.Context, result UpdatableResult) bool
+
+	// IsVisible returns true if the Wox window is currently visible.
+	// This is useful for plugins that perform periodic updates (e.g., CPU/memory monitoring)
+	// to avoid wasting resources when the window is hidden.
+	//
+	// Example:
+	//   func (p *Plugin) refreshData(ctx context.Context) {
+	//       if !p.api.IsVisible(ctx) {
+	//           return // Window is hidden, skip update
+	//       }
+	//       // ... update data ...
+	//   }
+	IsVisible(ctx context.Context) bool
+
+	// RefreshQuery re-executes the current query with the existing query text.
+	// This is useful when plugin data changes and you want to update the displayed results.
+	//
+	// Parameters:
+	//   - ctx: Context
+	//   - param: RefreshQueryParam to control refresh behavior
+	//
+	// Example - Refresh after marking item as favorite:
+	//   Action: func(ctx context.Context, actionContext ActionContext) {
+	//       markAsFavorite(item)
+	//       // Refresh query and preserve user's current selection
+	//       api.RefreshQuery(ctx, RefreshQueryParam{PreserveSelectedIndex: true})
+	//   }
+	//
+	// Example - Refresh after deleting item:
+	//   Action: func(ctx context.Context, actionContext ActionContext) {
+	//       deleteItem(item)
+	//       // Refresh query and reset to first item
+	//       api.RefreshQuery(ctx, RefreshQueryParam{PreserveSelectedIndex: false})
+	//   }
+	RefreshQuery(ctx context.Context, param RefreshQueryParam)
 }
 
 type APIImpl struct {
@@ -102,7 +212,14 @@ func (a *APIImpl) GetTranslation(ctx context.Context, key string) string {
 	if a.pluginInstance.IsSystemPlugin {
 		return i18n.GetI18nManager().TranslateWox(ctx, key)
 	} else {
-		return i18n.GetI18nManager().TranslatePlugin(ctx, key, a.pluginInstance.PluginDirectory)
+		// Try plugin translation first
+		translated := i18n.GetI18nManager().TranslatePlugin(ctx, key, a.pluginInstance.PluginDirectory)
+		// If translation failed, fallback to system translation
+		// This handles cases where third-party plugins use system i18n keys (like notification messages)
+		if key == translated {
+			translated = i18n.GetI18nManager().TranslateWox(ctx, key)
+		}
+		return translated
 	}
 }
 
@@ -314,6 +431,24 @@ func (a *APIImpl) OnMRURestore(ctx context.Context, callback func(mruData MRUDat
 	}
 
 	a.pluginInstance.MRURestoreCallbacks = append(a.pluginInstance.MRURestoreCallbacks, callback)
+}
+
+func (a *APIImpl) UpdateResult(ctx context.Context, result UpdatableResult) bool {
+	polishedResult := GetPluginManager().PolishUpdatableResult(ctx, a.pluginInstance, result)
+	success := GetPluginManager().GetUI().UpdateResult(ctx, polishedResult)
+	return success
+}
+
+func (a *APIImpl) GetUpdatableResult(ctx context.Context, resultId string) *UpdatableResult {
+	return GetPluginManager().GetUpdatableResult(ctx, resultId)
+}
+
+func (a *APIImpl) IsVisible(ctx context.Context) bool {
+	return GetPluginManager().GetUI().IsVisible(ctx)
+}
+
+func (a *APIImpl) RefreshQuery(ctx context.Context, param RefreshQueryParam) {
+	GetPluginManager().GetUI().RefreshQuery(ctx, param.PreserveSelectedIndex)
 }
 
 func NewAPI(instance *Instance) API {

@@ -102,29 +102,92 @@ export interface Result {
   Tails?: ResultTail[]
   ContextData?: string
   Actions?: ResultAction[]
-  // refresh result after specified interval, in milliseconds. If this value is 0, Wox will not refresh this result
-  // interval can only divisible by 100, if not, Wox will use the nearest number which is divisible by 100
-  // E.g. if you set 123, Wox will use 200, if you set 1234, Wox will use 1300
-  RefreshInterval?: number
-  // refresh result by calling OnRefresh function
-  OnRefresh?: (current: RefreshableResult) => Promise<RefreshableResult>
 }
 
 export interface ResultTail {
   Type: "text" | "image"
   Text?: string
   Image?: WoxImage
+  /** Tail id, should be unique. It's optional, if you don't set it, Wox will assign a random id for you */
+  Id?: string
+  /** Additional data associate with this tail, can be retrieved later */
+  ContextData?: string
 }
 
-export interface RefreshableResult {
-  Title: string
-  SubTitle: string
-  Icon: WoxImage
-  Preview: WoxPreview
-  Tails: ResultTail[]
-  ContextData: string
-  RefreshInterval: number
-  Actions: ResultAction[]
+/**
+ * Result that can be updated directly in the UI.
+ *
+ * All fields except Id are optional. Only non-undefined fields will be updated.
+ *
+ * Example usage:
+ * ```typescript
+ * // Update only the title
+ * const success = await api.updateResult(ctx, {
+ *   Id: resultId,
+ *   Title: "Downloading... 50%"
+ * })
+ *
+ * // Update title and tails
+ * const success = await api.updateResult(ctx, {
+ *   Id: resultId,
+ *   Title: "Processing...",
+ *   Tails: [{ Type: "text", Text: "Step 1/3" }]
+ * })
+ * ```
+ */
+export interface UpdatableResult {
+  /** Required - identifies which result to update */
+  Id: string
+  /** Optional - update the title */
+  Title?: string
+  /** Optional - update the subtitle */
+  SubTitle?: string
+  /** Optional - update the tails */
+  Tails?: ResultTail[]
+  /** Optional - update the preview */
+  Preview?: WoxPreview
+  /** Optional - update the actions */
+  Actions?: ResultAction[]
+}
+
+/**
+ * Represents an action that can be updated directly in the UI.
+ *
+ * This allows updating a single action's UI (name, icon, action callback) without replacing the entire actions array.
+ * All fields except ResultId and ActionId are optional. Only non-undefined fields will be updated.
+ *
+ * @example
+ * ```typescript
+ * // Update only the action name
+ * const success = await api.UpdateResultAction(ctx, {
+ *   ResultId: actionContext.ResultId,
+ *   ActionId: actionContext.ResultActionId,
+ *   Name: "Remove from favorite"
+ * })
+ *
+ * // Update name, icon and action callback
+ * const success = await api.UpdateResultAction(ctx, {
+ *   ResultId: actionContext.ResultId,
+ *   ActionId: actionContext.ResultActionId,
+ *   Name: "Add to favorite",
+ *   Icon: { ImageType: "emoji", ImageData: "⭐" },
+ *   Action: async (actionContext) => {
+ *     // New action logic
+ *   }
+ * })
+ * ```
+ */
+export interface UpdatableResultAction {
+  /** Required - identifies which result contains the action */
+  ResultId: string
+  /** Required - identifies which action to update */
+  ActionId: string
+  /** Optional - update the action name */
+  Name?: string
+  /** Optional - update the action icon */
+  Icon?: WoxImage
+  /** Optional - update the action callback */
+  Action?: (actionContext: ActionContext) => Promise<void>
 }
 
 export interface ResultAction {
@@ -151,9 +214,28 @@ export interface ResultAction {
    * If IsDefault is true, Hotkey will be set to enter key by default
    */
   Hotkey?: string
+  /**
+   * Additional data associate with this action, can be retrieved later
+   */
+  ContextData?: string
 }
 
 export interface ActionContext {
+  /**
+   * The ID of the result that triggered this action
+   * This is automatically set by Wox when the action is invoked
+   * Useful for calling UpdateResult API to update the result's UI
+   */
+  ResultId: string
+  /**
+   * The ID of the action that was triggered
+   * This is automatically set by Wox when the action is invoked
+   * Useful for calling UpdateResultAction API to update this action's UI
+   */
+  ResultActionId: string
+  /**
+   * Additional data associated with this result
+   */
   ContextData: string
 }
 
@@ -176,6 +258,15 @@ export interface ChangeQueryParam {
   QuerySelection?: Selection
 }
 
+export interface RefreshQueryParam {
+  /**
+   * Controls whether to maintain the previously selected item index after refresh.
+   * When true, the user's current selection index in the results list is preserved.
+   * When false, the selection resets to the first item (index 0).
+   */
+  PreserveSelectedIndex: boolean
+}
+
 export interface PublicAPI {
   /**
    * Change Wox query
@@ -191,6 +282,11 @@ export interface PublicAPI {
    * Show Wox
    */
   ShowApp: (ctx: Context) => Promise<void>
+
+  /**
+   * Check if Wox window is currently visible
+   */
+  IsVisible: (ctx: Context) => Promise<boolean>
 
   /**
    * Notify message
@@ -258,6 +354,148 @@ export interface PublicAPI {
    *                 Return null if the MRU data is no longer valid
    */
   OnMRURestore: (ctx: Context, callback: (mruData: MRUData) => Promise<Result | null>) => Promise<void>
+
+  /**
+   * Get the current state of a result that is displayed in the UI.
+   *
+   * Returns UpdatableResult with current values if the result is still visible.
+   * Returns null if the result is no longer visible.
+   *
+   * Note: System actions and tails (like favorite icon) are automatically filtered out.
+   * They will be re-added by the system when you call UpdateResult().
+   *
+   * Example:
+   * ```typescript
+   * // In an action handler
+   * Action: async (actionContext) => {
+   *   // Get current result state
+   *   const updatableResult = await api.GetUpdatableResult(ctx, actionContext.ResultId)
+   *   if (updatableResult === null) {
+   *     return  // Result no longer visible
+   *   }
+   *
+   *   // Modify the result
+   *   updatableResult.Title = "Updated title"
+   *   updatableResult.Tails?.push({ Type: "text", Text: "New tail" })
+   *
+   *   // Update the result
+   *   await api.UpdateResult(ctx, updatableResult)
+   * }
+   * ```
+   *
+   * @param ctx Context
+   * @param resultId ID of the result to get
+   * @returns Promise<UpdatableResult | null> Current result state, or null if not visible
+   */
+  GetUpdatableResult: (ctx: Context, resultId: string) => Promise<UpdatableResult | null>
+
+  /**
+   * Update a query result that is currently displayed in the UI.
+   *
+   * Returns true if the result was successfully updated (still visible in UI).
+   * Returns false if the result is no longer visible.
+   *
+   * This method is designed for long-running operations within Action handlers.
+   * Best practices:
+   * - Set PreventHideAfterAction: true in your action
+   * - Only use during action execution or in background tasks spawned by actions
+   * - For periodic updates, start a timer in init() and track result IDs
+   *
+   * Example:
+   * ```typescript
+   * // In an action handler
+   * Action: async (actionContext) => {
+   *   // Update only the title
+   *   const success = await api.UpdateResult(ctx, {
+   *     Id: actionContext.ResultId,
+   *     Title: "Downloading... 50%"
+   *   })
+   *
+   *   // Update title and tails
+   *   const success = await api.UpdateResult(ctx, {
+   *     Id: actionContext.ResultId,
+   *     Title: "Processing...",
+   *     Tails: [{ Type: "text", Text: "Step 1/3" }]
+   *   })
+   * }
+   * ```
+   *
+   * @param ctx Context
+   * @param result UpdatableResult with Id (required) and optional fields to update
+   * @returns Promise<boolean> True if updated successfully, false if result no longer visible
+   */
+  UpdateResult: (ctx: Context, result: UpdatableResult) => Promise<boolean>
+
+  /**
+   * Update a single action within a query result that is currently displayed in the UI.
+   *
+   * Returns true if the action was successfully updated (result still visible in UI).
+   * Returns false if the result is no longer visible.
+   *
+   * This method is designed for updating action UI after execution, such as toggling
+   * between "Add to favorite" and "Remove from favorite" states.
+   *
+   * Best practices:
+   * - Set PreventHideAfterAction: true in your action
+   * - Use actionContext.ResultActionId to identify which action to update
+   * - Only update fields that have changed (use undefined for fields you don't want to update)
+   *
+   * Example:
+   * ```typescript
+   * // In an action handler
+   * Action: async (actionContext) => {
+   *   if (isFavorite) {
+   *     removeFavorite()
+   *     const success = await api.UpdateResultAction(ctx, {
+   *       ResultId: actionContext.ResultId,
+   *       ActionId: actionContext.ResultActionId,
+   *       Name: "Add to favorite",
+   *       Icon: { ImageType: "emoji", ImageData: "⭐" }
+   *     })
+   *   } else {
+   *     addFavorite()
+   *     const success = await api.UpdateResultAction(ctx, {
+   *       ResultId: actionContext.ResultId,
+   *       ActionId: actionContext.ResultActionId,
+   *       Name: "Remove from favorite",
+   *       Icon: { ImageType: "emoji", ImageData: "❌" }
+   *     })
+   *   }
+   * }
+   * ```
+   *
+   * @param ctx Context
+   * @param action UpdatableResultAction with ResultId, ActionId (required) and optional fields to update
+   * @returns Promise<boolean> True if updated successfully, false if result no longer visible
+   */
+  UpdateResultAction: (ctx: Context, action: UpdatableResultAction) => Promise<boolean>
+
+  /**
+   * Re-execute the current query with the existing query text.
+   * This is useful when plugin data changes and you want to update the displayed results.
+   *
+   * Example - Refresh after marking item as favorite:
+   * ```typescript
+   * Action: async (actionContext) => {
+   *   markAsFavorite(item)
+   *   // Refresh query and preserve user's current selection
+   *   await api.RefreshQuery(ctx, { PreserveSelectedIndex: true })
+   * }
+   * ```
+   *
+   * Example - Refresh after deleting item:
+   * ```typescript
+   * Action: async (actionContext) => {
+   *   deleteItem(item)
+   *   // Refresh query and reset to first item
+   *   await api.RefreshQuery(ctx, { PreserveSelectedIndex: false })
+   * }
+   * ```
+   *
+   * @param ctx Context
+   * @param param RefreshQueryParam to control refresh behavior
+   */
+  RefreshQuery: (ctx: Context, param: RefreshQueryParam) => Promise<void>
 }
 
 export type WoxImageType = "absolute" | "relative" | "base64" | "svg" | "url" | "emoji" | "lottie"

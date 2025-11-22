@@ -1,7 +1,6 @@
 import 'package:wox/entity/wox_image.dart';
 import 'package:wox/entity/wox_list_item.dart';
 import 'package:wox/entity/wox_preview.dart';
-import 'package:wox/enums/wox_query_mode_enum.dart';
 import 'package:wox/enums/wox_position_type_enum.dart';
 import 'package:wox/enums/wox_query_type_enum.dart';
 import 'package:wox/enums/wox_selection_type_enum.dart';
@@ -99,7 +98,6 @@ class WoxQueryResult {
   late String contextData;
 
   late List<WoxResultAction> actions;
-  late int refreshInterval;
 
   // Used by the frontend to determine if this result is a group
   late bool isGroup;
@@ -117,7 +115,6 @@ class WoxQueryResult {
       required this.tails,
       required this.contextData,
       required this.actions,
-      required this.refreshInterval,
       required this.isGroup});
 
   WoxQueryResult.empty() {
@@ -133,7 +130,6 @@ class WoxQueryResult {
     tails = [];
     contextData = "";
     actions = [];
-    refreshInterval = 0;
     isGroup = false;
   }
 
@@ -169,7 +165,6 @@ class WoxQueryResult {
       actions = [];
     }
 
-    refreshInterval = json['RefreshInterval'];
     isGroup = false;
   }
 
@@ -186,7 +181,6 @@ class WoxQueryResult {
     data['GroupScore'] = groupScore;
     data['ContextData'] = contextData;
     data['Actions'] = actions.map((v) => v.toJson()).toList();
-    data['RefreshInterval'] = refreshInterval;
     data['Tails'] = tails.map((v) => v.toJson()).toList();
     return data;
   }
@@ -201,6 +195,7 @@ class WoxResultAction {
   late String hotkey;
   late bool isSystemAction;
   late String resultId;
+  late String contextData;
 
   WoxResultAction({
     required this.id,
@@ -211,6 +206,7 @@ class WoxResultAction {
     required this.hotkey,
     required this.isSystemAction,
     required this.resultId,
+    required this.contextData,
   });
 
   WoxResultAction.fromJson(Map<String, dynamic> json) {
@@ -224,6 +220,7 @@ class WoxResultAction {
     }
     isSystemAction = json['IsSystemAction'];
     resultId = json['ResultId'] ?? "";
+    contextData = json['ContextData'] ?? "";
   }
 
   Map<String, dynamic> toJson() {
@@ -236,11 +233,13 @@ class WoxResultAction {
     data['Hotkey'] = hotkey;
     data['IsSystemAction'] = isSystemAction;
     data['ResultId'] = resultId;
+    data['ContextData'] = contextData;
     return data;
   }
 
   static WoxResultAction empty() {
-    return WoxResultAction(id: "", name: "", icon: WoxImage.empty(), isDefault: false, preventHideAfterAction: false, hotkey: "", isSystemAction: false, resultId: "");
+    return WoxResultAction(
+        id: "", name: "", icon: WoxImage.empty(), isDefault: false, preventHideAfterAction: false, hotkey: "", isSystemAction: false, resultId: "", contextData: "");
   }
 }
 
@@ -262,10 +261,12 @@ class ShowAppParams {
   late bool selectAll;
   late Position position;
   late List<QueryHistory> queryHistories;
-  late WoxQueryMode queryMode;
+  late String launchMode;
+  late String startPage;
   late bool autoFocusToChatInput;
 
-  ShowAppParams({required this.selectAll, required this.position, required this.queryHistories, required this.queryMode, this.autoFocusToChatInput = false});
+  ShowAppParams(
+      {required this.selectAll, required this.position, required this.queryHistories, required this.launchMode, required this.startPage, this.autoFocusToChatInput = false});
 
   ShowAppParams.fromJson(Map<String, dynamic> json) {
     selectAll = json['SelectAll'];
@@ -277,7 +278,8 @@ class ShowAppParams {
       final List<dynamic> histories = json['QueryHistories'];
       queryHistories = histories.map((v) => QueryHistory.fromJson(v)).toList();
     }
-    queryMode = json['QueryMode'] ?? 'empty';
+    launchMode = json['LaunchMode'] ?? 'continue';
+    startPage = json['StartPage'] ?? 'mru';
     autoFocusToChatInput = json['AutoFocusToChatInput'] ?? false;
   }
 }
@@ -291,68 +293,6 @@ class WoxListViewItemParams {
     title = json['Title'];
     subTitle = json['SubTitle'] ?? "";
     icon = json['Icon'];
-  }
-}
-
-class WoxRefreshableResult {
-  late String resultId;
-  late String title;
-  late String subTitle;
-  late WoxImage icon;
-  late WoxPreview preview;
-  late List<WoxListItemTail> tails;
-  late String contextData;
-  late int refreshInterval;
-  late List<WoxResultAction> actions;
-
-  WoxRefreshableResult({
-    required this.resultId,
-    required this.title,
-    required this.subTitle,
-    required this.icon,
-    required this.preview,
-    required this.tails,
-    required this.contextData,
-    required this.refreshInterval,
-    required this.actions,
-  });
-
-  WoxRefreshableResult.fromJson(Map<String, dynamic> json) {
-    resultId = json['ResultId'];
-    title = json['Title'];
-    subTitle = json['SubTitle'] ?? "";
-    icon = WoxImage.fromJson(json['Icon']);
-    preview = WoxPreview.fromJson(json['Preview']);
-    tails = <WoxListItemTail>[];
-    if (json['Tails'] != null) {
-      json['Tails'].forEach((v) {
-        tails.add(WoxListItemTail.fromJson(v));
-      });
-    }
-    contextData = json['ContextData'];
-    refreshInterval = json['RefreshInterval'];
-    actions = <WoxResultAction>[];
-    if (json['Actions'] != null) {
-      json['Actions'].forEach((v) {
-        var action = WoxResultAction.fromJson(v);
-        action.resultId = resultId;
-        actions.add(action);
-      });
-    }
-  }
-
-  Map<String, dynamic> toJson() {
-    final Map<String, dynamic> data = <String, dynamic>{};
-    data['ResultId'] = resultId;
-    data['Title'] = title;
-    data['SubTitle'] = subTitle;
-    data['Icon'] = icon.toJson();
-    data['Preview'] = preview.toJson();
-    data['Tails'] = tails.map((v) => v.toJson()).toList();
-    data['ContextData'] = contextData;
-    data['RefreshInterval'] = refreshInterval;
-    data['Actions'] = actions.map((v) => v.toJson()).toList();
-    return data;
   }
 }
 
@@ -370,14 +310,46 @@ class QueryIconInfo {
   }
 }
 
-class UpdateableResult {
+class UpdatableResult {
   late String id;
-  late String? title;
+  String? title;
+  String? subTitle;
+  List<WoxListItemTail>? tails;
+  WoxPreview? preview;
+  List<WoxResultAction>? actions;
 
-  UpdateableResult({required this.id, this.title});
+  UpdatableResult({
+    required this.id,
+    this.title,
+    this.subTitle,
+    this.tails,
+    this.preview,
+    this.actions,
+  });
 
-  UpdateableResult.fromJson(Map<String, dynamic> json) {
+  UpdatableResult.fromJson(Map<String, dynamic> json) {
     id = json['Id'];
     title = json['Title'];
+    subTitle = json['SubTitle'];
+
+    if (json['Tails'] != null) {
+      tails = [];
+      json['Tails'].forEach((v) {
+        tails!.add(WoxListItemTail.fromJson(v));
+      });
+    }
+
+    if (json['Preview'] != null) {
+      preview = WoxPreview.fromJson(json['Preview']);
+    }
+
+    if (json['Actions'] != null) {
+      actions = [];
+      json['Actions'].forEach((v) {
+        var action = WoxResultAction.fromJson(v);
+        action.resultId = id;
+        actions!.add(action);
+      });
+    }
   }
 }

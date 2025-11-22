@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"wox/common"
-	"wox/util"
 	"wox/util/selection"
 
 	"github.com/samber/lo"
@@ -90,6 +89,14 @@ type QueryEnv struct {
 	ActiveBrowserUrl string
 }
 
+// RefreshQueryParam contains parameters for refreshing a query
+type RefreshQueryParam struct {
+	// PreserveSelectedIndex controls whether to maintain the previously selected item index after refresh
+	// When true, the user's current selection index in the results list is preserved
+	// When false, the selection resets to the first item (index 0)
+	PreserveSelectedIndex bool
+}
+
 // Query result return from plugin
 type QueryResult struct {
 	// Result id, should be unique. It's optional, if you don't set it, Wox will assign a random id for you
@@ -111,18 +118,19 @@ type QueryResult struct {
 	// Additional data associate with this result, can be retrieved in Action function
 	ContextData string
 	Actions     []QueryResultAction
-	// refresh result after specified interval, in milliseconds. If this value is 0, Wox will not refresh this result
-	// interval can only divisible by 100, if not, Wox will use the nearest number which is divisible by 100
-	// E.g. if you set 123, Wox will use 200, if you set 1234, Wox will use 1300
-	RefreshInterval int
-	// refresh result by calling OnRefresh function
-	OnRefresh func(ctx context.Context, current RefreshableResult) RefreshableResult
 }
 
 type QueryResultTail struct {
+	// Tail id, should be unique. It's optional, if you don't set it, Wox will assign a random id for you
+	Id    string
 	Type  QueryResultTailType
 	Text  string          // only available when type is QueryResultTailTypeText
 	Image common.WoxImage // only available when type is QueryResultTailTypeImage
+	// Additional data associate with this tail, can be retrieved later
+	ContextData string
+
+	// internal use
+	IsSystemTail bool
 }
 
 func NewQueryResultTailText(text string) QueryResultTail {
@@ -139,7 +147,7 @@ func NewQueryResultTailTexts(texts ...string) []QueryResultTail {
 }
 
 type QueryResultAction struct {
-	// Result id, should be unique. It's optional, if you don't set it, Wox will assign a random id for you
+	// Action id, should be unique. It's optional, if you don't set it, Wox will assign a random id for you
 	Id string
 	// Name support i18n
 	Name string
@@ -149,18 +157,30 @@ type QueryResultAction struct {
 	IsDefault bool
 	// If true, Wox will not hide after user select this result
 	PreventHideAfterAction bool
-	Action                 func(ctx context.Context, actionContext ActionContext)
+	Action                 func(ctx context.Context, actionContext ActionContext) `json:"-"` // Exclude from JSON serialization
 	// Hotkey to trigger this action. E.g. "ctrl+Shift+Space", "Ctrl+1", "Command+K"
 	// Case insensitive, space insensitive
 	// If IsDefault is true, Hotkey will be set to enter key by default
 	// Wox will normalize the hotkey to platform specific format. E.g. "ctrl" will be converted to "control" on macOS
 	Hotkey string
+	// Additional data associate with this action, can be retrieved later
+	ContextData string
 
 	// internal use
 	IsSystemAction bool
 }
 
 type ActionContext struct {
+	// The ID of the result that triggered this action
+	// This is automatically set by Wox when the action is invoked
+	// Useful for calling UpdateResult API to update the result's UI
+	ResultId string
+
+	// The ID of the action that was triggered
+	// This is automatically set by Wox when the action is invoked
+	// Useful for calling UpdateResultAction API to update this specific action's UI
+	ResultActionId string
+
 	// Additional data associate with this result
 	ContextData string
 }
@@ -188,24 +208,22 @@ func (q *QueryResult) ToUI() QueryResultUI {
 				IsSystemAction:         action.IsSystemAction,
 			}
 		}),
-		RefreshInterval: q.RefreshInterval,
 	}
 }
 
 type QueryResultUI struct {
-	QueryId         string
-	Id              string
-	Title           string
-	SubTitle        string
-	Icon            common.WoxImage
-	Preview         WoxPreview
-	Score           int64
-	Group           string
-	GroupScore      int64
-	Tails           []QueryResultTail
-	ContextData     string
-	Actions         []QueryResultActionUI
-	RefreshInterval int
+	QueryId     string
+	Id          string
+	Title       string
+	SubTitle    string
+	Icon        common.WoxImage
+	Preview     WoxPreview
+	Score       int64
+	Group       string
+	GroupScore  int64
+	Tails       []QueryResultTail
+	ContextData string
+	Actions     []QueryResultActionUI
 }
 
 type QueryResultActionUI struct {
@@ -220,18 +238,51 @@ type QueryResultActionUI struct {
 	IsSystemAction bool
 }
 
+// UpdatableResult is used to update a query result that is currently displayed in the UI.
+//
+// This struct serves two purposes:
+// 1. As the return type of GetUpdatableResult() - contains the current state of the result
+// 2. As the parameter of UpdateResult() - specifies which fields to update
+//
+// When returned by GetUpdatableResult():
+// - All fields contain the current values from the result cache
+// - You can modify any fields and pass it back to UpdateResult()
+//
+// When passed to UpdateResult():
+// - All fields except Id are optional (pointers). Only non-nil fields will be updated.
+// - This allows you to update specific fields without affecting others.
+//
+// Example usage:
+//
+//	// Get current result state
+//	updatableResult := api.GetUpdatableResult(ctx, resultId)
+//	if updatableResult != nil {
+//	    // Modify any fields
+//	    newTitle := "Downloading... 50%"
+//	    updatableResult.Title = &newTitle
+//	    updatableResult.Tails = append(*updatableResult.Tails, NewQueryResultTailText("50%"))
+//
+//	    // Update the result
+//	    api.UpdateResult(ctx, *updatableResult)
+//	}
+type UpdatableResult struct {
+	// Id is required - identifies which result to update
+	Id string
+
+	// Optional fields - only non-nil fields will be updated
+	Title    *string
+	SubTitle *string
+	Icon     *common.WoxImage
+	Preview  *WoxPreview
+	Tails    *[]QueryResultTail
+	Actions  *[]QueryResultAction
+}
+
 // store latest result value after query/refresh, so we can retrieve data later in action/refresh
 type QueryResultCache struct {
-	ResultId       string
-	ResultTitle    string
-	ResultSubTitle string
-	ContextData    string
-	Icon           common.WoxImage
-	Refresh        func(context.Context, RefreshableResult) RefreshableResult
+	Result         QueryResult // store the full QueryResult including actions with callbacks
 	PluginInstance *Instance
 	Query          Query
-	Preview        WoxPreview
-	Actions        *util.HashMap[string, func(ctx context.Context, actionContext ActionContext)]
 }
 
 func newQueryInputWithPlugins(query string, pluginInstances []*Instance) (Query, *Instance) {

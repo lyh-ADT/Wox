@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:uuid/v4.dart';
+import 'package:wox/components/wox_button.dart';
+import 'package:wox/components/wox_panel.dart';
+import 'package:wox/components/wox_textfield.dart';
 import 'package:wox/entity/wox_runtime_status.dart';
 import 'package:wox/modules/setting/views/wox_setting_base.dart';
 import 'package:wox/utils/colors.dart';
@@ -30,32 +33,15 @@ class WoxSettingRuntimeView extends WoxSettingBaseView {
     final bool isRunning = status.isStarted;
     final Color baseBackground = getThemeBackgroundColor();
     final bool isDarkTheme = baseBackground.computeLuminance() < 0.5;
-    final Color panelColor = getThemePanelBackgroundColor();
-    Color cardColor = panelColor.opacity < 1 ? Color.alphaBlend(panelColor, baseBackground) : panelColor;
-    cardColor = isDarkTheme ? cardColor.lighter(6) : cardColor.darker(4);
     final Color textColor = getThemeTextColor();
     final Color subTextColor = getThemeSubTextColor();
     final Color statusColor = isRunning ? Colors.green : Colors.red;
-    final Color outlineColor = getThemeDividerColor().withOpacity(isDarkTheme ? 0.45 : 0.25);
 
     final IconData statusIcon = isRunning ? Icons.check_circle : Icons.error;
     final String stateLabel = isRunning ? controller.tr("ui_runtime_status_running") : controller.tr("ui_runtime_status_stopped");
     final String pluginCountLabel = controller.tr("ui_runtime_status_plugin_count").replaceAll("{count}", status.loadedPluginCount.toString());
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: outlineColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDarkTheme ? 0.24 : 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
+    return WoxPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -66,7 +52,7 @@ class WoxSettingRuntimeView extends WoxSettingBaseView {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(isDarkTheme ? 0.32 : 0.18),
+                  color: statusColor.withValues(alpha: isDarkTheme ? 0.32 : 0.18),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(statusIcon, color: statusColor, size: 20),
@@ -288,27 +274,17 @@ class WoxSettingRuntimeView extends WoxSettingBaseView {
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
+                    child: WoxTextField(
                       controller: pythonController!,
-                      style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText: controller.tr("ui_runtime_python_path_placeholder"),
-                        hintStyle: TextStyle(color: getThemeTextColor().withOpacity(0.5), fontSize: 13),
-                        enabledBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: getThemeTextColor().withOpacity(0.3)),
-                        ),
-                        focusedBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: getThemeActiveBackgroundColor(), width: 2),
-                        ),
-                      ),
+                      hintText: controller.tr("ui_runtime_python_path_placeholder"),
                       onChanged: (value) {
                         updatePythonPath(value);
                       },
                     ),
                   ),
                   const SizedBox(width: 10),
-                  ElevatedButton(
-                    child: Text(controller.tr("ui_runtime_browse")),
+                  WoxButton.primary(
+                    text: controller.tr("ui_runtime_browse"),
                     onPressed: () async {
                       final result = await FileSelector.pick(
                         const UuidV4().generate(),
@@ -321,8 +297,8 @@ class WoxSettingRuntimeView extends WoxSettingBaseView {
                     },
                   ),
                   const SizedBox(width: 10),
-                  ElevatedButton(
-                    child: Text(controller.tr("ui_runtime_clear")),
+                  WoxButton.secondary(
+                    text: controller.tr("ui_runtime_clear"),
                     onPressed: () {
                       pythonController!.clear();
                       updatePythonPath("");
@@ -363,27 +339,17 @@ class WoxSettingRuntimeView extends WoxSettingBaseView {
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
+                    child: WoxTextField(
                       controller: nodejsController!,
-                      style: TextStyle(color: getThemeTextColor(), fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText: controller.tr("ui_runtime_nodejs_path_placeholder"),
-                        hintStyle: TextStyle(color: getThemeTextColor().withOpacity(0.5), fontSize: 13),
-                        enabledBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: getThemeTextColor().withOpacity(0.3)),
-                        ),
-                        focusedBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: getThemeActiveBackgroundColor(), width: 2),
-                        ),
-                      ),
+                      hintText: controller.tr("ui_runtime_nodejs_path_placeholder"),
                       onChanged: (value) {
                         updateNodejsPath(value);
                       },
                     ),
                   ),
                   const SizedBox(width: 10),
-                  ElevatedButton(
-                    child: Text(controller.tr("ui_runtime_browse")),
+                  WoxButton.primary(
+                    text: controller.tr("ui_runtime_browse"),
                     onPressed: () async {
                       final result = await FileSelector.pick(
                         const UuidV4().generate(),
@@ -396,8 +362,8 @@ class WoxSettingRuntimeView extends WoxSettingBaseView {
                     },
                   ),
                   const SizedBox(width: 10),
-                  ElevatedButton(
-                    child: Text(controller.tr("ui_runtime_clear")),
+                  WoxButton.secondary(
+                    text: controller.tr("ui_runtime_clear"),
                     onPressed: () {
                       nodejsController!.clear();
                       updateNodejsPath("");
