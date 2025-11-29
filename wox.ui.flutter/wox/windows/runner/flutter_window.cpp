@@ -587,7 +587,7 @@ void FlutterWindow::HandleWindowManagerMethodCall(
 
       // Use ShowWindow to properly hide the window
       // This should properly reset Flutter's internal state
-      ShowWindow(hwnd, SW_HIDE);
+      ShowWindowAsync(hwnd, SW_HIDE);
 
       result->Success();
     }
