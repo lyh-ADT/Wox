@@ -21,6 +21,7 @@
 | `SupportedOS`        | ✅   | `Windows`/`Linux`/`Macos`，脚本插件留空时默认全部        | `["Windows","Macos"]`                                     |
 | `Features`           | ⭕   | 可选能力开关（见下方）                                   | `[{"Name":"debounce","Params":{"IntervalMs":"200"}}]`     |
 | `SettingDefinitions` | ⭕   | 设置表单定义                                             | `[...]`                                                   |
+| `I18n`               | ⭕   | 内联翻译（见 [国际化](#国际化)）                         | `{"en_US":{"key":"value"}}`                               |
 
 ### Icon 格式
 
@@ -73,6 +74,7 @@
 - `deepLink`：插件自定义深度链接。
 - `resultPreviewWidthRatio`：控制结果列表与预览区宽度比例，`WidthRatio` 取 0~1。
 - `mru`：启用最近使用（MRU），插件需实现 `OnMRURestore`。
+- `gridLayout`：以网格布局展示结果，适合展示表情、图标、颜色等视觉元素。详见 [网格布局](#网格布局)。
 
 ## SettingDefinitions
 
@@ -194,16 +196,16 @@ class MyPlugin(Plugin):
 Node.js（SDK）：
 
 ```typescript
-import { Plugin, Context, PluginInitParams, PluginSettingDefinitionItem } from "@wox-launcher/wox-plugin"
+import { Plugin, Context, PluginInitParams, PluginSettingDefinitionItem } from "@wox-launcher/wox-plugin";
 
 class MyPlugin implements Plugin {
-  private api: any
+  private api: any;
 
   async init(ctx: Context, params: PluginInitParams): Promise<void> {
-    this.api = params.API
+    this.api = params.API;
 
     await this.api.OnGetDynamicSetting(ctx, (key: string): PluginSettingDefinitionItem | null => {
-      if (key !== "runtime_options") return null
+      if (key !== "runtime_options") return null;
       return {
         Type: "select",
         Value: {
@@ -212,13 +214,225 @@ class MyPlugin implements Plugin {
           DefaultValue: "a",
           Options: [
             { Label: "Option A", Value: "a" },
-            { Label: "Option B", Value: "b" }
-          ]
-        }
-      }
-    })
+            { Label: "Option B", Value: "b" },
+          ],
+        },
+      };
+    });
   }
 }
 ```
 
 > 提示：动态设置会在打开设置页面时按需获取。请保持回调快速且可预期，如需远程数据请做好缓存，避免拖慢 UI。
+
+## 国际化
+
+Wox 支持插件国际化（i18n），让你的插件可以根据用户的语言偏好显示不同的文本。有两种方式提供翻译：
+
+### 方式一：在 plugin.json 中内联配置（推荐脚本插件使用）
+
+直接在 `plugin.json` 中使用 `I18n` 字段定义翻译。这对于没有目录结构的脚本插件特别有用：
+
+```json
+{
+  "Id": "my-plugin-id",
+  "Name": "My Plugin",
+  "Description": "i18n:plugin_description",
+  "TriggerKeywords": ["mp"],
+  "I18n": {
+    "en_US": {
+      "plugin_description": "A useful plugin",
+      "result_title": "Result: {0}",
+      "action_copy": "Copy to clipboard"
+    },
+    "zh_CN": {
+      "plugin_description": "一个有用的插件",
+      "result_title": "结果: {0}",
+      "action_copy": "复制到剪贴板"
+    }
+  }
+}
+```
+
+### 方式二：语言文件（推荐全功能插件使用）
+
+在插件根目录创建 `lang/` 目录，存放以语言代码命名的 JSON 文件：
+
+```
+my-plugin/
+├── plugin.json
+├── main.py
+└── lang/
+    ├── en_US.json
+    └── zh_CN.json
+```
+
+每个语言文件包含扁平的键值对：
+
+```json
+// lang/en_US.json
+{
+  "plugin_description": "A useful plugin",
+  "result_title": "Result: {0}",
+  "action_copy": "Copy to clipboard"
+}
+```
+
+```json
+// lang/zh_CN.json
+{
+  "plugin_description": "一个有用的插件",
+  "result_title": "结果: {0}",
+  "action_copy": "复制到剪贴板"
+}
+```
+
+### 使用翻译
+
+要使用翻译，在文本前加上 `i18n:` 前缀，后跟翻译键：
+
+```python
+# Python 示例
+result = Result(
+    title="i18n:result_title",
+    sub_title="i18n:action_copy"
+)
+
+# 或使用 API 程序化获取翻译文本
+translated = await api.get_translation(ctx, "i18n:result_title")
+```
+
+```typescript
+// Node.js 示例
+const result: Result = {
+  Title: "i18n:result_title",
+  SubTitle: "i18n:action_copy",
+};
+
+// 或使用 API
+const translated = await api.GetTranslation(ctx, "i18n:result_title");
+```
+
+### 翻译优先级
+
+Wox 按以下顺序查找翻译：
+
+1. plugin.json 中的内联 `I18n`（当前语言）
+2. `lang/{当前语言}.json` 文件
+3. plugin.json 中的内联 `I18n`（en_US 回退）
+4. `lang/en_US.json` 文件（回退）
+5. 如果都未找到，返回原始键
+
+### 支持的语言
+
+| 代码    | 语言             |
+| ------- | ---------------- |
+| `en_US` | 英语（美国）     |
+| `zh_CN` | 简体中文         |
+| `pt_BR` | 葡萄牙语（巴西） |
+| `ru_RU` | 俄语             |
+
+> 提示：始终提供 `en_US` 翻译作为回退语言。
+
+## 网格布局
+
+`gridLayout` 功能可将结果以网格形式展示，替代默认的垂直列表。适用于展示表情符号、图标、颜色或图片缩略图等视觉元素的插件。
+
+### 配置
+
+在 `plugin.json` 中添加 `gridLayout` 功能：
+
+```json
+{
+  "Features": [
+    {
+      "Name": "gridLayout",
+      "Params": {
+        "Columns": "8",
+        "ShowTitle": "false",
+        "ItemPadding": "12",
+        "ItemMargin": "6"
+      }
+    }
+  ]
+}
+```
+
+### 参数
+
+| 参数          | 类型   | 默认值    | 描述                                            |
+| ------------- | ------ | --------- | ----------------------------------------------- |
+| `Columns`     | string | `"8"`     | 每行列数                                        |
+| `ShowTitle`   | string | `"false"` | 是否在图标下方显示标题（`"true"` 或 `"false"`） |
+| `ItemPadding` | string | `"12"`    | 网格项内边距（像素）                            |
+| `ItemMargin`  | string | `"6"`     | 网格项外边距（像素）                            |
+
+### 结果结构
+
+使用网格布局时，每个结果应包含：
+
+- **Icon**：网格单元格中显示的主要视觉元素（必需）
+- **Title**：如果 `ShowTitle` 为 `"true"`，则显示在图标下方（过长时省略号截断）
+- **Group**：可选分组，用于将项目组织成带标题的分区
+
+### 示例：表情选择器插件
+
+```json
+{
+  "Id": "emoji-picker-plugin",
+  "Name": "Emoji Picker",
+  "TriggerKeywords": ["emoji"],
+  "Features": [
+    {
+      "Name": "gridLayout",
+      "Params": {
+        "Columns": "12",
+        "ShowTitle": "false",
+        "ItemPadding": "12",
+        "ItemMargin": "6"
+      }
+    }
+  ]
+}
+```
+
+```python
+from wox_plugin import Plugin, Context, Query, Result
+
+class EmojiPlugin(Plugin):
+    async def query(self, ctx: Context, query: Query) -> list[Result]:
+        emojis = ["😀", "😃", "😄", "😁", "😅", "😂", "🤣", "😊"]
+        return [
+            Result(
+                title=emoji,
+                icon=f"emoji:{emoji}",
+                group="笑脸"
+            )
+            for emoji in emojis
+        ]
+```
+
+### 分组项目
+
+使用 `group` 字段将网格项目组织成分区。具有相同 group 值的项目会显示在同一个分组标题下：
+
+```python
+results = [
+    Result(title="😀", icon="emoji:😀", group="笑脸"),
+    Result(title="😃", icon="emoji:😃", group="笑脸"),
+    Result(title="❤️", icon="emoji:❤️", group="爱心"),
+    Result(title="💙", icon="emoji:💙", group="爱心"),
+]
+```
+
+这会生成带有"笑脸"和"爱心"分区标题的布局，每个分区下是对应的表情网格。
+
+### 布局计算
+
+网格会根据以下规则自动计算项目尺寸：
+
+1. 可用宽度 ÷ 列数 = 单元格宽度
+2. 图标尺寸 = 单元格宽度 - (ItemPadding + ItemMargin) × 2
+3. 单元格高度 = 单元格宽度 + 标题高度（如果启用 ShowTitle）
+
+调整 `ItemPadding` 和 `ItemMargin` 可控制项目间距。较大的值会增加留白空间，较小的值可在屏幕上容纳更多项目。

@@ -82,9 +82,18 @@ class WoxImageView extends StatelessWidget {
     } else if (woxImage.imageType == WoxImageTypeEnum.WOX_IMAGE_TYPE_SVG.code) {
       imageWidget = SvgPicture.string(woxImage.imageData, width: width, height: height);
     } else if (woxImage.imageType == WoxImageTypeEnum.WOX_IMAGE_TYPE_EMOJI.code) {
-      imageWidget = Padding(
-        padding: const EdgeInsets.only(left: 2, right: 2),
-        child: Text(woxImage.imageData, style: TextStyle(fontSize: width)),
+      // on windows, the emoji has default padding, so we need to offset it a bit
+      var offset = const Offset(0, 0);
+      if (Platform.isWindows) {
+        offset = const Offset(-6, -2);
+      }
+
+      imageWidget = Transform.translate(
+        offset: offset,
+        child: Transform.scale(
+          scale: 1.03,
+          child: Text(woxImage.imageData, style: TextStyle(fontSize: width, height: 1.0)),
+        ),
       );
     } else if (woxImage.imageType == WoxImageTypeEnum.WOX_IMAGE_TYPE_LOTTIE.code) {
       final bytes = utf8.encode(woxImage.imageData);

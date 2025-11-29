@@ -41,6 +41,11 @@ const (
 	// enable this feature to support MRU (Most Recently Used) functionality
 	// plugin must implement OnMRURestore callback to restore results from MRU data
 	MetadataFeatureMRU MetadataFeatureName = "mru"
+
+	// enable this feature to display results in a grid layout instead of list
+	// useful for plugins that display visual items like emoji, icons, colors, etc.
+	// params see MetadataFeatureParamsGridLayout
+	MetadataFeatureGridLayout MetadataFeatureName = "gridLayout"
 )
 
 // Metadata parsed from plugin.json, see `Plugin.json.md` for more detail
@@ -61,6 +66,11 @@ type Metadata struct {
 	SupportedOS        []string
 	Features           []MetadataFeature
 	SettingDefinitions definition.PluginSettingDefinitions
+
+	// I18n holds inline translations for the plugin.
+	// Map structure: langCode -> key -> translatedValue
+	// Example: {"en_US": {"title": "Hello"}, "zh_CN": {"title": "你好"}}
+	I18n map[string]map[string]string
 }
 
 func (m *Metadata) GetIconOrDefault(pluginDirectory string, defaultImage common.WoxImage) common.WoxImage {
@@ -199,4 +209,57 @@ type MetadataFeatureParamsQueryEnv struct {
 
 type MetadataFeatureParamsResultPreviewWidthRatio struct {
 	WidthRatio float64 // [0-1]
+}
+
+// MetadataFeatureParamsGridLayout contains parameters for grid layout feature
+type MetadataFeatureParamsGridLayout struct {
+	Columns     int  // number of columns per row, default 8
+	ShowTitle   bool // whether to show title below icon, default false
+	ItemPadding int  // padding inside each item, default 12
+	ItemMargin  int  // margin outside each item (all sides), default 6
+}
+
+func (m *Metadata) GetFeatureParamsForGridLayout() (MetadataFeatureParamsGridLayout, error) {
+	for _, feature := range m.Features {
+		if strings.EqualFold(feature.Name, MetadataFeatureGridLayout) {
+			params := MetadataFeatureParamsGridLayout{
+				Columns:     8,
+				ShowTitle:   false,
+				ItemPadding: 12,
+				ItemMargin:  6,
+			}
+
+			if v, ok := feature.Params["Columns"]; ok {
+				if columns, err := strconv.Atoi(v); err == nil {
+					params.Columns = columns
+				} else {
+					return MetadataFeatureParamsGridLayout{}, fmt.Errorf("gridLayout feature Columns param is not a valid number: %s", err.Error())
+				}
+			}
+
+			if v, ok := feature.Params["ShowTitle"]; ok {
+				params.ShowTitle = v == "true"
+			}
+
+			if v, ok := feature.Params["ItemPadding"]; ok {
+				if padding, err := strconv.Atoi(v); err == nil {
+					params.ItemPadding = padding
+				} else {
+					return MetadataFeatureParamsGridLayout{}, fmt.Errorf("gridLayout feature ItemPadding param is not a valid number: %s", err.Error())
+				}
+			}
+
+			if v, ok := feature.Params["ItemMargin"]; ok {
+				if margin, err := strconv.Atoi(v); err == nil {
+					params.ItemMargin = margin
+				} else {
+					return MetadataFeatureParamsGridLayout{}, fmt.Errorf("gridLayout feature ItemMargin param is not a valid number: %s", err.Error())
+				}
+			}
+
+			return params, nil
+		}
+	}
+
+	return MetadataFeatureParamsGridLayout{}, errors.New("plugin does not support gridLayout feature")
 }

@@ -21,6 +21,7 @@
 | `SupportedOS`        | ✅       | Any of `Windows`, `Linux`, `Macos`. Empty defaults to all for script plugins.               | `["Windows","Macos"]`                                     |
 | `Features`           | ⭕       | Optional feature flags with parameters (see below)                                          | `[{"Name":"debounce","Params":{"IntervalMs":"200"}}]`     |
 | `SettingDefinitions` | ⭕       | Settings schema rendered in Wox settings                                                    | `[...]`                                                   |
+| `I18n`               | ⭕       | Inline translations (see [Internationalization](#internationalization))                     | `{"en_US":{"key":"value"}}`                               |
 
 ### Icon formats
 
@@ -73,6 +74,7 @@ Add items to `Features` when your plugin needs extra capabilities:
 - `deepLink` – enables custom deep links exposed by the plugin.
 - `resultPreviewWidthRatio` – control result list vs preview width. Params: `WidthRatio` between 0 and 1.
 - `mru` – enable Most Recently Used support; implement `OnMRURestore` in your plugin.
+- `gridLayout` – display results in a grid layout instead of a list. Useful for visual items like emoji, icons, or colors. See [Grid Layout](#grid-layout) for details.
 
 ## SettingDefinitions
 
@@ -194,16 +196,16 @@ class MyPlugin(Plugin):
 Node.js (SDK types):
 
 ```typescript
-import { Plugin, Context, PluginInitParams, PluginSettingDefinitionItem } from "@wox-launcher/wox-plugin"
+import { Plugin, Context, PluginInitParams, PluginSettingDefinitionItem } from "@wox-launcher/wox-plugin";
 
 class MyPlugin implements Plugin {
-  private api: any
+  private api: any;
 
   async init(ctx: Context, params: PluginInitParams): Promise<void> {
-    this.api = params.API
+    this.api = params.API;
 
     await this.api.OnGetDynamicSetting(ctx, (key: string): PluginSettingDefinitionItem | null => {
-      if (key !== "runtime_options") return null
+      if (key !== "runtime_options") return null;
       return {
         Type: "select",
         Value: {
@@ -212,13 +214,225 @@ class MyPlugin implements Plugin {
           DefaultValue: "a",
           Options: [
             { Label: "Option A", Value: "a" },
-            { Label: "Option B", Value: "b" }
-          ]
-        }
-      }
-    })
+            { Label: "Option B", Value: "b" },
+          ],
+        },
+      };
+    });
   }
 }
 ```
 
 > Heads-up: dynamic settings are fetched on demand when the settings page is opened. Keep callbacks fast and deterministic; cache remote data if needed to avoid slowing the UI.
+
+## Internationalization
+
+Wox supports plugin internationalization (i18n) so your plugin can display text in the user's preferred language. There are two ways to provide translations:
+
+### Method 1: Inline I18n in plugin.json (Recommended for Script Plugins)
+
+Define translations directly in `plugin.json` using the `I18n` field. This is especially useful for script plugins that don't have a directory structure:
+
+```json
+{
+  "Id": "my-plugin-id",
+  "Name": "My Plugin",
+  "Description": "i18n:plugin_description",
+  "TriggerKeywords": ["mp"],
+  "I18n": {
+    "en_US": {
+      "plugin_description": "A useful plugin",
+      "result_title": "Result: {0}",
+      "action_copy": "Copy to clipboard"
+    },
+    "zh_CN": {
+      "plugin_description": "一个有用的插件",
+      "result_title": "结果: {0}",
+      "action_copy": "复制到剪贴板"
+    }
+  }
+}
+```
+
+### Method 2: Language Files (Recommended for Full-Featured Plugins)
+
+Create a `lang/` directory in your plugin root with JSON files named by language code:
+
+```
+my-plugin/
+├── plugin.json
+├── main.py
+└── lang/
+    ├── en_US.json
+    └── zh_CN.json
+```
+
+Each language file contains a flat key-value map:
+
+```json
+// lang/en_US.json
+{
+  "plugin_description": "A useful plugin",
+  "result_title": "Result: {0}",
+  "action_copy": "Copy to clipboard"
+}
+```
+
+```json
+// lang/zh_CN.json
+{
+  "plugin_description": "一个有用的插件",
+  "result_title": "结果: {0}",
+  "action_copy": "复制到剪贴板"
+}
+```
+
+### Using Translations
+
+To use a translation, prefix your text with `i18n:` followed by the key:
+
+```python
+# Python example
+result = Result(
+    title="i18n:result_title",
+    sub_title="i18n:action_copy"
+)
+
+# Or use the API to get translated text programmatically
+translated = await api.get_translation(ctx, "i18n:result_title")
+```
+
+```typescript
+// Node.js example
+const result: Result = {
+  Title: "i18n:result_title",
+  SubTitle: "i18n:action_copy",
+};
+
+// Or use the API
+const translated = await api.GetTranslation(ctx, "i18n:result_title");
+```
+
+### Translation Priority
+
+Wox looks up translations in this order:
+
+1. Inline `I18n` in plugin.json (current language)
+2. `lang/{current_lang}.json` file
+3. Inline `I18n` in plugin.json (en_US fallback)
+4. `lang/en_US.json` file (fallback)
+5. Return the original key if no translation found
+
+### Supported Languages
+
+| Code    | Language             |
+| ------- | -------------------- |
+| `en_US` | English (US)         |
+| `zh_CN` | Chinese (Simplified) |
+| `pt_BR` | Portuguese (Brazil)  |
+| `ru_RU` | Russian              |
+
+> Tip: Always provide `en_US` translations as the fallback language.
+
+## Grid Layout
+
+The `gridLayout` feature enables displaying results in a grid format instead of the default vertical list. This is ideal for plugins that display visual items such as emoji, icons, colors, or image thumbnails.
+
+### Configuration
+
+Add the `gridLayout` feature to your `plugin.json`:
+
+```json
+{
+  "Features": [
+    {
+      "Name": "gridLayout",
+      "Params": {
+        "Columns": "8",
+        "ShowTitle": "false",
+        "ItemPadding": "12",
+        "ItemMargin": "6"
+      }
+    }
+  ]
+}
+```
+
+### Parameters
+
+| Parameter     | Type   | Default   | Description                                                        |
+| ------------- | ------ | --------- | ------------------------------------------------------------------ |
+| `Columns`     | string | `"8"`     | Number of columns per row                                          |
+| `ShowTitle`   | string | `"false"` | Whether to show title text below each icon (`"true"` or `"false"`) |
+| `ItemPadding` | string | `"12"`    | Padding inside each grid item (in pixels)                          |
+| `ItemMargin`  | string | `"6"`     | Margin around each grid item (in pixels)                           |
+
+### Result Structure
+
+When using grid layout, each result should have:
+
+- **Icon**: The main visual element displayed in the grid cell (required)
+- **Title**: Shown below the icon if `ShowTitle` is `"true"` (truncated with ellipsis if too long)
+- **Group**: Optional grouping to organize items into sections with headers
+
+### Example: Emoji Picker Plugin
+
+```json
+{
+  "Id": "emoji-picker-plugin",
+  "Name": "Emoji Picker",
+  "TriggerKeywords": ["emoji"],
+  "Features": [
+    {
+      "Name": "gridLayout",
+      "Params": {
+        "Columns": "12",
+        "ShowTitle": "false",
+        "ItemPadding": "12",
+        "ItemMargin": "6"
+      }
+    }
+  ]
+}
+```
+
+```python
+from wox_plugin import Plugin, Context, Query, Result
+
+class EmojiPlugin(Plugin):
+    async def query(self, ctx: Context, query: Query) -> list[Result]:
+        emojis = ["😀", "😃", "😄", "😁", "😅", "😂", "🤣", "😊"]
+        return [
+            Result(
+                title=emoji,
+                icon=f"emoji:{emoji}",
+                group="Smileys"
+            )
+            for emoji in emojis
+        ]
+```
+
+### Grouping Items
+
+Use the `group` field to organize grid items into sections. Items with the same group value will be displayed together under a group header:
+
+```python
+results = [
+    Result(title="😀", icon="emoji:😀", group="Smileys"),
+    Result(title="😃", icon="emoji:😃", group="Smileys"),
+    Result(title="❤️", icon="emoji:❤️", group="Hearts"),
+    Result(title="💙", icon="emoji:💙", group="Hearts"),
+]
+```
+
+This produces a layout with "Smileys" and "Hearts" section headers, each followed by their respective emoji in a grid.
+
+### Layout Calculation
+
+The grid automatically calculates item sizes based on:
+
+1. Available width divided by number of columns = cell width
+2. Icon size = cell width - (ItemPadding + ItemMargin) × 2
+3. Cell height = cell width + title height (if ShowTitle is enabled)
+
+Adjust `ItemPadding` and `ItemMargin` to control spacing between items. Larger values create more breathing room; smaller values fit more items on screen.

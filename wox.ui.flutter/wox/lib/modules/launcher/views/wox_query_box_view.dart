@@ -194,6 +194,18 @@ class WoxQueryBoxView extends GetView<WoxLauncherController> {
                         case LogicalKeyboardKey.arrowUp:
                           controller.handleQueryBoxArrowUp();
                           return KeyEventResult.handled;
+                        case LogicalKeyboardKey.arrowLeft:
+                          if (controller.isInGridMode()) {
+                            controller.handleQueryBoxArrowLeft();
+                            return KeyEventResult.handled;
+                          }
+                          break;
+                        case LogicalKeyboardKey.arrowRight:
+                          if (controller.isInGridMode()) {
+                            controller.handleQueryBoxArrowRight();
+                            return KeyEventResult.handled;
+                          }
+                          break;
                         case LogicalKeyboardKey.tab:
                           controller.autoCompleteQuery(const UuidV4().generate());
                           return KeyEventResult.handled;
@@ -214,6 +226,18 @@ class WoxQueryBoxView extends GetView<WoxLauncherController> {
                         case LogicalKeyboardKey.arrowUp:
                           controller.handleQueryBoxArrowUp();
                           return KeyEventResult.handled;
+                        case LogicalKeyboardKey.arrowLeft:
+                          if (controller.isInGridMode()) {
+                            controller.handleQueryBoxArrowLeft();
+                            return KeyEventResult.handled;
+                          }
+                          break;
+                        case LogicalKeyboardKey.arrowRight:
+                          if (controller.isInGridMode()) {
+                            controller.handleQueryBoxArrowRight();
+                            return KeyEventResult.handled;
+                          }
+                          break;
                       }
                     }
                   }
@@ -273,20 +297,21 @@ class WoxQueryBoxView extends GetView<WoxLauncherController> {
             onDragEnd: () {
               controller.focusQueryBox();
             },
-            child: Container(
+            child: SizedBox(
               width: 55,
               height: 55,
-              color: Colors.transparent,
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: MouseRegion(
-                  cursor: controller.queryIcon.value.action != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
-                  child: GestureDetector(
-                    onTap: () {
-                      controller.queryIcon.value.action?.call();
-                      controller.focusQueryBox();
-                    },
-                    child: WoxImageView(woxImage: controller.queryIcon.value.icon, width: 24, height: 24),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: MouseRegion(
+                    cursor: controller.queryIcon.value.action != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+                    child: GestureDetector(
+                      onTap: () {
+                        controller.queryIcon.value.action?.call();
+                        controller.focusQueryBox();
+                      },
+                      child: WoxImageView(woxImage: controller.queryIcon.value.icon, width: 30, height: 30),
+                    ),
                   ),
                 ),
               ),

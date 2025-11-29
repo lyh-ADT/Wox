@@ -452,6 +452,11 @@
   "plugin_calculator_copy_result": "Copiar resultado",
   "plugin_calculator_recalculate": "Recalcular",
   "plugin_calculator_input_expression": "Digite a expressão para calcular",
+  "plugin_emoji_copy": "Copiar emoji",
+  "plugin_emoji_copy_large": "Copiar ícone grande",
+  "plugin_emoji_remove_frequently_used": "Remover dos frequentes",
+  "plugin_emoji_frequently_used": "Usados frequentemente",
+  "plugin_emoji_all": "Emojis",
   "plugin_file_open": "Abrir",
   "plugin_file_open_containing_folder": "Abrir pasta contendo",
   "plugin_file_show_context_menu": "Mostrar menu de contexto do sistema",
@@ -551,5 +556,9 @@
   "selection_preview": "Visualizar",
   "selection_created_at": "Criado em",
   "selection_modified_at": "Modificado em",
-  "selection_size": "Tamanho"
+  "selection_size": "Tamanho",
+  "plugin_emoji_add_description": "Adicionar descrição",
+  "plugin_emoji_add_description_label": "Descrição",
+  "ui_not_supported_field": "Tipo de campo não suportado",
+  "plugin_emoji_add_description_hint": "Adicione descrições personalizadas para este emoji, separadas por vírgulas."
 }

@@ -452,6 +452,11 @@
   "plugin_calculator_copy_result": "Копировать результат",
   "plugin_calculator_recalculate": "Пересчитать",
   "plugin_calculator_input_expression": "Введите выражение для вычисления",
+  "plugin_emoji_copy": "Копировать эмодзи",
+  "plugin_emoji_copy_large": "Копировать большой значок",
+  "plugin_emoji_remove_frequently_used": "Удалить из часто используемых",
+  "plugin_emoji_frequently_used": "Часто используемые",
+  "plugin_emoji_all": "Эмодзи",
   "plugin_file_open": "Открыть",
   "plugin_file_open_containing_folder": "Открыть содержащую папку",
   "plugin_file_show_context_menu": "Показать системное контекстное меню",
@@ -550,5 +555,9 @@
   "selection_preview": "Предпросмотр",
   "selection_created_at": "Создано",
   "selection_modified_at": "Изменено",
-  "selection_size": "Размер"
+  "selection_size": "Размер",
+  "plugin_emoji_add_description": "Добавить описание",
+  "plugin_emoji_add_description_label": "Описание",
+  "ui_not_supported_field": "Тип поля не поддерживается",
+  "plugin_emoji_add_description_hint": "Добавьте свои описания для этого эмодзи, разделяйте запятыми."
 }

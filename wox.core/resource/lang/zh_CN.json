@@ -456,6 +456,11 @@
   "plugin_calculator_copy_result": "复制结果",
   "plugin_calculator_recalculate": "重新计算",
   "plugin_calculator_input_expression": "输入表达式进行计算",
+  "plugin_emoji_copy": "复制表情",
+  "plugin_emoji_copy_large": "复制大图标",
+  "plugin_emoji_remove_frequently_used": "从常用中移除",
+  "plugin_emoji_frequently_used": "常用",
+  "plugin_emoji_all": "全部表情",
   "plugin_file_open": "打开",
   "plugin_file_open_containing_folder": "打开所在文件夹",
   "plugin_file_show_context_menu": "显示系统右键菜单",
@@ -555,5 +560,9 @@
   "selection_preview": "预览",
   "selection_created_at": "创建时间",
   "selection_modified_at": "修改时间",
-  "selection_size": "大小"
+  "selection_size": "大小",
+  "plugin_emoji_add_description": "添加描述",
+  "plugin_emoji_add_description_label": "描述",
+  "ui_not_supported_field": "该字段类型暂不支持",
+  "plugin_emoji_add_description_hint": "为该表情添加自定义描述，多个描述用逗号分隔。"
 }

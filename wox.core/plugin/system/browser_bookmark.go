@@ -14,7 +14,7 @@ import (
 	"github.com/mitchellh/go-homedir"
 )
 
-var browserBookmarkIcon = plugin.PluginBookmarkIcon
+var browserBookmarkIcon = common.PluginBookmarkIcon
 
 func init() {
 	plugin.AllSystemPlugin = append(plugin.AllSystemPlugin, &BrowserBookmarkPlugin{})
@@ -287,6 +287,15 @@ func (c *BrowserBookmarkPlugin) handleMRURestore(mruData plugin.MRUData) (*plugi
 
 	if !found {
 		return nil, fmt.Errorf("bookmark no longer exists: %s", contextData.Name)
+	}
+
+	if !mruData.Icon.IsValid() {
+		// default icon, overlay cached favicon if exists (no network)
+		icon := browserBookmarkIcon
+		if cachedIcon, ok := getWebsiteIconFromCacheOnly(context.Background(), contextData.Url); ok {
+			icon = cachedIcon.Overlay(browserBookmarkIcon, 0.4, 0.6, 0.6)
+		}
+		mruData.Icon = icon
 	}
 
 	result := &plugin.QueryResult{

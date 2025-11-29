@@ -10,12 +10,17 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:uuid/v4.dart';
-import 'package:wox/controllers/wox_list_controller.dart';
+import 'package:wox/components/wox_form_action_view.dart';
 import 'package:wox/controllers/query_box_text_editing_controller.dart';
 import 'package:wox/controllers/wox_ai_chat_controller.dart';
+import 'package:wox/controllers/wox_base_list_controller.dart';
+import 'package:wox/controllers/wox_grid_controller.dart';
+import 'package:wox/controllers/wox_list_controller.dart';
 import 'package:wox/entity/wox_ai.dart';
 import 'package:wox/entity/wox_list_item.dart';
+import 'package:wox/entity/wox_plugin_setting.dart';
 import 'package:wox/models/doctor_check_result.dart';
+import 'package:wox/utils/wox_theme_util.dart';
 import 'package:wox/utils/windows/window_manager.dart';
 import 'package:wox/api/wox_api.dart';
 import 'package:wox/entity/wox_hotkey.dart';
@@ -72,10 +77,18 @@ class WoxLauncherController extends GetxController {
 
   // result related variables
   late final WoxListController<WoxQueryResult> resultListViewController;
+  late final WoxGridController<WoxQueryResult> resultGridViewController;
+  WoxBaseListController<WoxQueryResult> get activeResultViewController => isInGridMode() ? resultGridViewController : resultListViewController;
 
   // action related variables
   late final WoxListController<WoxResultAction> actionListViewController;
   final isShowActionPanel = false.obs;
+
+  // form action related variables
+  final isShowFormActionPanel = false.obs;
+  final activeFormAction = Rxn<WoxResultAction>();
+  final activeFormResultId = "".obs;
+  final formActionValues = <String, String>{}.obs;
 
   /// The timer to clear query results.
   /// On every query changed, it will reset the timer and will clear the query results after N ms.
@@ -123,6 +136,10 @@ class WoxLauncherController extends GetxController {
   final quickSelectDelay = 300; // delay to show number labels
   bool isQuickSelectKeyPressed = false;
 
+  // grid layout related variables
+  final isGridLayout = false.obs;
+  final gridLayoutParams = GridLayoutParams.empty().obs;
+
   @override
   void onInit() {
     super.onInit();
@@ -136,6 +153,17 @@ class WoxLauncherController extends GetxController {
         onItemsEmpty: onResultItemsEmpty,
       ),
       tag: 'result',
+    );
+
+    resultGridViewController = Get.put(
+      WoxGridController(
+        onItemExecuted: (traceId, item) {
+          executeDefaultAction(traceId);
+        },
+        onItemActive: onResultItemActivated,
+        onItemsEmpty: onResultItemsEmpty,
+      ),
+      tag: 'grid',
     );
 
     actionListViewController = Get.put(
@@ -166,6 +194,11 @@ class WoxLauncherController extends GetxController {
         updateQuickSelectNumbers(const UuidV4().generate());
       }
     });
+    resultGridViewController.scrollController.addListener(() {
+      if (isQuickSelectMode.value) {
+        updateQuickSelectNumbers(const UuidV4().generate());
+      }
+    });
 
     // Initialize doctor check info
     doctorCheckInfo.value = DoctorCheckInfo.empty();
@@ -173,9 +206,9 @@ class WoxLauncherController extends GetxController {
 
   bool get isShowDoctorCheckInfo => currentQuery.value.isEmpty && !doctorCheckInfo.value.allPassed;
 
-  bool get isShowToolbar => resultListViewController.items.isNotEmpty || isShowDoctorCheckInfo;
+  bool get isShowToolbar => activeResultViewController.items.isNotEmpty || isShowDoctorCheckInfo;
 
-  bool get isToolbarShowedWithoutResults => isShowToolbar && resultListViewController.items.isEmpty;
+  bool get isToolbarShowedWithoutResults => isShowToolbar && activeResultViewController.items.isEmpty;
 
   /// Triggered when received query results from the server.
   void onReceivedQueryResults(String traceId, List<WoxQueryResult> receivedResults) {
@@ -192,7 +225,7 @@ class WoxLauncherController extends GetxController {
     clearQueryResultsTimer.cancel();
 
     //merge results
-    final existingQueryResults = resultListViewController.items.where((item) => item.value.data.queryId == currentQuery.value.queryId).map((e) => e.value.data).toList();
+    final existingQueryResults = activeResultViewController.items.where((item) => item.value.data.queryId == currentQuery.value.queryId).map((e) => e.value.data).toList();
     final finalResults = List<WoxQueryResult>.from(existingQueryResults)..addAll(receivedResults);
 
     //group results
@@ -234,25 +267,28 @@ class WoxLauncherController extends GetxController {
 
     // Use silent mode to avoid triggering onItemActive callback during updateItems (which may cause a little performance issue)
     // Following resetActiveResult will trigger the callback
-    resultListViewController.updateItems(traceId, finalResultsSorted.map((e) => WoxListItem.fromQueryResult(e)).toList(), silent: true);
+    final listItems = finalResultsSorted.map((e) => WoxListItem.fromQueryResult(e)).toList();
+    resultListViewController.updateItems(traceId, listItems, silent: true);
+    resultGridViewController.updateItems(traceId, listItems, silent: true);
 
     // Handle index preservation or reset
+    final controller = activeResultViewController;
     if (_pendingPreservedIndex != null) {
       // Restore the preserved index
       final targetIndex = _pendingPreservedIndex!;
       _pendingPreservedIndex = null; // Clear the pending index
 
       // Ensure the index is within bounds
-      if (targetIndex < resultListViewController.items.length) {
+      if (targetIndex < controller.items.length) {
         // Skip group items - find the next non-group item
         var actualIndex = targetIndex;
-        while (actualIndex < resultListViewController.items.length && resultListViewController.items[actualIndex].value.data.isGroup) {
+        while (actualIndex < controller.items.length && controller.items[actualIndex].value.data.isGroup) {
           actualIndex++;
         }
 
         // If we found a valid non-group item, use it; otherwise reset to first
-        if (actualIndex < resultListViewController.items.length) {
-          resultListViewController.updateActiveIndex(traceId, actualIndex);
+        if (actualIndex < controller.items.length) {
+          controller.updateActiveIndex(traceId, actualIndex);
           Logger.instance.debug(traceId, "restored active index to: $actualIndex (original: $targetIndex)");
         } else {
           resetActiveResult();
@@ -265,7 +301,7 @@ class WoxLauncherController extends GetxController {
     } else {
       // Normal behavior: if current query already has results and active result is not the first one, then do not reset active result and action
       // this will prevent the active result from being reset to the first one when the query results are received
-      if (existingQueryResults.isEmpty || resultListViewController.activeIndex.value == 0) {
+      if (existingQueryResults.isEmpty || controller.activeIndex.value == 0) {
         resetActiveResult();
       }
     }
@@ -387,7 +423,7 @@ class WoxLauncherController extends GetxController {
   }
 
   Future<void> toggleActionPanel(String traceId) async {
-    if (resultListViewController.items.isEmpty) {
+    if (activeResultViewController.items.isEmpty) {
       return;
     }
 
@@ -409,6 +445,31 @@ class WoxLauncherController extends GetxController {
   void hideActionPanel(String traceId) {
     isShowActionPanel.value = false;
     actionListViewController.clearFilter(traceId);
+    focusQueryBox();
+    resizeHeight();
+  }
+
+  void showFormActionPanel(WoxResultAction action, String resultId) {
+    activeFormAction.value = action;
+    activeFormResultId.value = resultId;
+    formActionValues.clear();
+    for (final item in action.form) {
+      final key = (item.value as dynamic).key as String?;
+      if (key != null) {
+        final defaultValue = (item.value as dynamic).defaultValue as String? ?? "";
+        formActionValues[key] = defaultValue;
+      }
+    }
+    isShowFormActionPanel.value = true;
+    isShowActionPanel.value = false;
+    resizeHeight();
+  }
+
+  void hideFormActionPanel(String traceId) {
+    activeFormAction.value = null;
+    activeFormResultId.value = "";
+    formActionValues.clear();
+    isShowFormActionPanel.value = false;
     focusQueryBox();
     resizeHeight();
   }
@@ -436,13 +497,12 @@ class WoxLauncherController extends GetxController {
   }
 
   WoxQueryResult? getActiveResult() {
-    if (resultListViewController.activeIndex.value >= resultListViewController.items.length ||
-        resultListViewController.activeIndex.value < 0 ||
-        resultListViewController.items.isEmpty) {
+    final controller = activeResultViewController;
+    if (controller.activeIndex.value >= controller.items.length || controller.activeIndex.value < 0 || controller.items.isEmpty) {
       return null;
     }
 
-    return resultListViewController.items[resultListViewController.activeIndex.value].value.data;
+    return controller.items[controller.activeIndex.value].value.data;
   }
 
   /// given a hotkey, find the action in the result
@@ -482,15 +542,20 @@ class WoxLauncherController extends GetxController {
     var preventHideAfterAction = action.preventHideAfterAction;
     Logger.instance.debug(traceId, "execute action: ${action.name}, prevent hide after action: $preventHideAfterAction");
 
-    await WoxWebsocketMsgUtil.instance.sendMessage(
-      WoxWebsocketMsg(
-        requestId: const UuidV4().generate(),
-        traceId: traceId,
-        type: WoxMsgTypeEnum.WOX_MSG_TYPE_REQUEST.code,
-        method: WoxMsgMethodEnum.WOX_MSG_METHOD_ACTION.code,
-        data: {"resultId": result.id, "actionId": action.id},
-      ),
-    );
+    if (action.type == "form") {
+      showFormActionPanel(action, result.id);
+      return;
+    } else {
+      await WoxWebsocketMsgUtil.instance.sendMessage(
+        WoxWebsocketMsg(
+          requestId: const UuidV4().generate(),
+          traceId: traceId,
+          type: WoxMsgTypeEnum.WOX_MSG_TYPE_REQUEST.code,
+          method: WoxMsgMethodEnum.WOX_MSG_METHOD_ACTION.code,
+          data: {"resultId": result.id, "actionId": action.id},
+        ),
+      );
+    }
 
     // clear the search text after action is executed
     actionListViewController.clearFilter(traceId);
@@ -498,9 +563,44 @@ class WoxLauncherController extends GetxController {
     if (!preventHideAfterAction) {
       hideApp(traceId);
     }
+
     if (isShowActionPanel.value) {
       hideActionPanel(traceId);
     }
+    if (isShowFormActionPanel.value) {
+      hideFormActionPanel(traceId);
+    } else {
+      if (Platform.isWindows) {
+        // Windows-specific workaround: On Windows, when an async function awaits,
+        // the event loop processes pending platform events which may include IME-related
+        // focus changes. This causes the TextField to unexpectedly lose focus.
+        // We restore focus after all UI updates are done.
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          focusQueryBox();
+        });
+      }
+    }
+  }
+
+  Future<void> submitFormAction(String traceId) async {
+    final action = activeFormAction.value;
+    final resultId = activeFormResultId.value;
+    if (action == null || resultId.isEmpty) {
+      hideFormActionPanel(traceId);
+      return;
+    }
+
+    await WoxWebsocketMsgUtil.instance.sendMessage(
+      WoxWebsocketMsg(
+        requestId: const UuidV4().generate(),
+        traceId: traceId,
+        type: WoxMsgTypeEnum.WOX_MSG_TYPE_REQUEST.code,
+        method: WoxMsgMethodEnum.WOX_MSG_METHOD_FORM_ACTION.code,
+        data: {"resultId": resultId, "actionId": action.id, "values": formActionValues},
+      ),
+    );
+
+    hideFormActionPanel(traceId);
   }
 
   Future<void> autoCompleteQuery(String traceId) async {
@@ -520,10 +620,13 @@ class WoxLauncherController extends GetxController {
   void onQueryBoxTextChanged(String value) {
     canArrowUpHistory = false;
     resultListViewController.isMouseMoved = false;
+    resultGridViewController.isMouseMoved = false;
 
     if (currentQuery.value.queryType == WoxQueryTypeEnum.WOX_QUERY_TYPE_SELECTION.code) {
       // do local filter if query type is selection
-      resultListViewController.filterItems(const UuidV4().generate(), value);
+      final traceId = const UuidV4().generate();
+      resultListViewController.filterItems(traceId, value);
+      resultGridViewController.filterItems(traceId, value);
       // there maybe no results after filtering, we need to resize height to hide the action panel
       // or show the preview panel
       resizeHeight();
@@ -540,8 +643,7 @@ class WoxLauncherController extends GetxController {
     var queryId = const UuidV4().generate();
     currentQuery.value = PlainQuery.emptyInput();
     currentQuery.value.queryId = queryId;
-
-    updateQueryIconOnQueryChanged(traceId, currentQuery.value);
+    updatePluginMetadataOnQueryChanged(traceId, currentQuery.value);
 
     try {
       final results = await WoxApi.instance.queryMRU(traceId);
@@ -587,8 +689,7 @@ class WoxLauncherController extends GetxController {
     if (moveCursorToEnd) {
       moveQueryBoxCursorToEnd();
     }
-    updateQueryIconOnQueryChanged(traceId, query);
-    updateResultPreviewWidthRatioOnQueryChanged(traceId, query);
+    updatePluginMetadataOnQueryChanged(traceId, query);
     if (query.isEmpty) {
       // Check if we should show MRU results when query is empty (based on start page setting)
       if (lastStartPage == WoxStartPageEnum.WOX_START_PAGE_MRU.code) {
@@ -637,7 +738,7 @@ class WoxLauncherController extends GetxController {
 
     // Save current active index if we need to preserve it
     if (preserveSelectedIndex) {
-      final savedActiveIndex = resultListViewController.activeIndex.value;
+      final savedActiveIndex = activeResultViewController.activeIndex.value;
       _pendingPreservedIndex = savedActiveIndex;
       Logger.instance.debug(traceId, "preserving selected index: $savedActiveIndex");
     }
@@ -683,6 +784,7 @@ class WoxLauncherController extends GetxController {
       responseWoxWebsocketRequest(msg, true, null);
     } else if (msg.method == "ChangeQuery") {
       onQueryChanged(msg.traceId, PlainQuery.fromJson(msg.data), "receive change query from wox", moveCursorToEnd: true);
+      focusQueryBox();
       responseWoxWebsocketRequest(msg, true, null);
     } else if (msg.method == "RefreshQuery") {
       final preserveSelectedIndex = msg.data['preserveSelectedIndex'] as bool? ?? false;
@@ -692,6 +794,10 @@ class WoxLauncherController extends GetxController {
       final theme = WoxTheme.fromJson(msg.data);
       WoxThemeUtil.instance.changeTheme(theme);
       resizeHeight(); // Theme height maybe changed, so we need to resize height
+      // Theme change triggers widget rebuild which may lose focus, so we need to restore focus after rebuild
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        focusQueryBox();
+      });
       responseWoxWebsocketRequest(msg, true, null);
     } else if (msg.method == "PickFiles") {
       final pickFilesParams = FileSelectorParams.fromJson(msg.data);
@@ -767,7 +873,7 @@ class WoxLauncherController extends GetxController {
           final startTime = queryStartTimeMap[msg.traceId];
           if (startTime != null) {
             final completePaintTime = DateTime.now().millisecondsSinceEpoch - startTime;
-            Logger.instance.info(msg.traceId, "🎨 COMPLETE PAINT: ${completePaintTime}ms (total ${resultListViewController.items.length} results rendered)");
+            Logger.instance.info(msg.traceId, "🎨 COMPLETE PAINT: ${completePaintTime}ms (total ${activeResultViewController.items.length} results rendered)");
             // Clean up to avoid memory leak
             queryStartTimeMap.remove(msg.traceId);
           }
@@ -791,6 +897,7 @@ class WoxLauncherController extends GetxController {
 
   Future<void> clearQueryResults(String traceId) async {
     resultListViewController.clearItems();
+    resultGridViewController.clearItems();
     actionListViewController.clearItems();
     isShowPreviewPanel.value = false;
     isShowActionPanel.value = false;
@@ -826,24 +933,41 @@ class WoxLauncherController extends GetxController {
 
   /// reset and jump active result to top of the list
   void resetActiveResult() {
-    if (resultListViewController.items.isNotEmpty) {
-      if (resultListViewController.items.first.value.isGroup) {
-        resultListViewController.updateActiveIndex(const UuidV4().generate(), 1);
+    final controller = activeResultViewController;
+    if (controller.items.isNotEmpty) {
+      if (controller.items.first.value.isGroup) {
+        controller.updateActiveIndex(const UuidV4().generate(), 1);
       } else {
-        resultListViewController.updateActiveIndex(const UuidV4().generate(), 0);
+        controller.updateActiveIndex(const UuidV4().generate(), 0);
       }
     }
   }
 
   Future<void> resizeHeight() async {
-    final maxResultCount = WoxSettingUtil.instance.currentSetting.maxResultCount;
-    final actualResultCount = resultListViewController.items.length > maxResultCount ? maxResultCount : resultListViewController.items.length;
-    double resultHeight = WoxThemeUtil.instance.getResultListViewHeightByCount(actualResultCount);
+    // Don't resize when in setting view, setting view has its own fixed size (1200x800)
+    if (isInSettingView.value) {
+      return;
+    }
 
+    final maxResultCount = WoxSettingUtil.instance.currentSetting.maxResultCount;
+    final maxHeight = WoxThemeUtil.instance.getResultListViewHeightByCount(maxResultCount);
+    final itemCount = activeResultViewController.items.length;
+    double resultHeight;
+
+    if (isInGridMode()) {
+      resultHeight = resultGridViewController.calculateGridHeight();
+    } else {
+      resultHeight = WoxThemeUtil.instance.getResultListViewHeightByCount(itemCount);
+    }
+
+    if (resultHeight > maxHeight) {
+      resultHeight = maxHeight;
+    }
     if (isShowActionPanel.value || isShowPreviewPanel.value) {
       resultHeight = WoxThemeUtil.instance.getResultListViewHeightByCount(maxResultCount);
     }
-    if (resultListViewController.items.isNotEmpty) {
+
+    if (itemCount > 0) {
       resultHeight += WoxThemeUtil.instance.currentTheme.value.resultContainerPaddingTop + WoxThemeUtil.instance.currentTheme.value.resultContainerPaddingBottom;
     }
     // Only add toolbar height when toolbar is actually shown in UI
@@ -871,42 +995,43 @@ class WoxLauncherController extends GetxController {
 
   void clearHoveredResult() {
     resultListViewController.clearHoveredResult();
+    resultGridViewController.clearHoveredResult();
   }
 
-  bool updateResult(String traceId, UpdatableResult UpdatableResult) {
+  bool updateResult(String traceId, UpdatableResult updatableResult) {
     // Try to find the result in the current items
     try {
-      final result = resultListViewController.items.firstWhere((element) => element.value.data.id == UpdatableResult.id);
+      final result = activeResultViewController.items.firstWhere((element) => element.value.data.id == updatableResult.id);
       var needUpdate = false;
       var updatedResult = result.value;
       var updatedData = result.value.data;
 
       // Update only non-null fields
-      if (UpdatableResult.title != null) {
-        updatedResult = updatedResult.copyWith(title: UpdatableResult.title);
-        updatedData.title = UpdatableResult.title!;
+      if (updatableResult.title != null) {
+        updatedResult = updatedResult.copyWith(title: updatableResult.title);
+        updatedData.title = updatableResult.title!;
         needUpdate = true;
       }
 
-      if (UpdatableResult.subTitle != null) {
-        updatedResult = updatedResult.copyWith(subTitle: UpdatableResult.subTitle);
-        updatedData.subTitle = UpdatableResult.subTitle!;
+      if (updatableResult.subTitle != null) {
+        updatedResult = updatedResult.copyWith(subTitle: updatableResult.subTitle);
+        updatedData.subTitle = updatableResult.subTitle!;
         needUpdate = true;
       }
 
-      if (UpdatableResult.tails != null) {
-        updatedResult = updatedResult.copyWith(tails: UpdatableResult.tails);
-        updatedData.tails = UpdatableResult.tails!;
+      if (updatableResult.tails != null) {
+        updatedResult = updatedResult.copyWith(tails: updatableResult.tails);
+        updatedData.tails = updatableResult.tails!;
         needUpdate = true;
       }
 
-      if (UpdatableResult.preview != null) {
-        updatedData.preview = UpdatableResult.preview!;
+      if (updatableResult.preview != null) {
+        updatedData.preview = updatableResult.preview!;
         needUpdate = true;
       }
 
-      if (UpdatableResult.actions != null) {
-        updatedData.actions = UpdatableResult.actions!;
+      if (updatableResult.actions != null) {
+        updatedData.actions = updatableResult.actions!;
         needUpdate = true;
       }
 
@@ -914,13 +1039,15 @@ class WoxLauncherController extends GetxController {
         // Force create a new WoxListItem with updated data to trigger reactive update
         updatedResult = updatedResult.copyWith(data: updatedData);
         resultListViewController.updateItem(traceId, updatedResult);
+        resultGridViewController.updateItem(traceId, updatedResult);
 
         // If this result is currently active, update the preview and actions
-        if (resultListViewController.isItemActive(updatedData.id)) {
-          if (UpdatableResult.preview != null) {
+        if (activeResultViewController.isItemActive(updatedData.id)) {
+          if (updatableResult.preview != null) {
             final oldShowPreview = isShowPreviewPanel.value;
-            currentPreview.value = UpdatableResult.preview!;
-            isShowPreviewPanel.value = currentPreview.value.previewData != "";
+            currentPreview.value = updatableResult.preview!;
+            // Grid layout doesn't support preview panel
+            isShowPreviewPanel.value = !isInGridMode() && currentPreview.value.previewData != "";
 
             // If preview panel visibility changed, resize window height
             if (oldShowPreview != isShowPreviewPanel.value) {
@@ -928,7 +1055,7 @@ class WoxLauncherController extends GetxController {
             }
           }
 
-          if (UpdatableResult.actions != null) {
+          if (updatableResult.actions != null) {
             // Save user's current selection before updateItems (which calls filterItems and resets index)
             var oldActionName = getCurrentActionName();
 
@@ -999,6 +1126,7 @@ class WoxLauncherController extends GetxController {
     queryBoxTextFieldController.dispose();
     actionListViewController.dispose();
     resultListViewController.dispose();
+    resultGridViewController.dispose();
     super.dispose();
   }
 
@@ -1112,12 +1240,12 @@ class WoxLauncherController extends GetxController {
     }
 
     // Get the active result
-    if (resultListViewController.items.isEmpty) {
+    if (activeResultViewController.items.isEmpty) {
       Logger.instance.debug(traceId, "no results to execute");
       return;
     }
 
-    var activeResult = resultListViewController.activeItem;
+    var activeResult = activeResultViewController.activeItem;
     if (activeResult.isGroup) {
       Logger.instance.debug(traceId, "cannot execute group item");
       return;
@@ -1150,7 +1278,7 @@ class WoxLauncherController extends GetxController {
   }
 
   void handleChatResponse(String traceId, WoxAIChatData data) {
-    for (var result in resultListViewController.items) {
+    for (var result in activeResultViewController.items) {
       if (result.value.data.contextData == data.id) {
         // update preview in result list view item
         // otherwise, the preview will lost when user switch to other result and back
@@ -1194,17 +1322,30 @@ class WoxLauncherController extends GetxController {
       return;
     }
 
-    resultListViewController.updateActiveIndexByDirection(const UuidV4().generate(), WoxDirectionEnum.WOX_DIRECTION_UP.code);
+    activeResultViewController.updateActiveIndexByDirection(const UuidV4().generate(), WoxDirectionEnum.WOX_DIRECTION_UP.code);
   }
 
   void handleQueryBoxArrowDown() {
     canArrowUpHistory = false;
-    resultListViewController.updateActiveIndexByDirection(const UuidV4().generate(), WoxDirectionEnum.WOX_DIRECTION_DOWN.code);
+    activeResultViewController.updateActiveIndexByDirection(const UuidV4().generate(), WoxDirectionEnum.WOX_DIRECTION_DOWN.code);
+  }
+
+  void handleQueryBoxArrowLeft() {
+    activeResultViewController.updateActiveIndexByDirection(const UuidV4().generate(), WoxDirectionEnum.WOX_DIRECTION_LEFT.code);
+  }
+
+  void handleQueryBoxArrowRight() {
+    activeResultViewController.updateActiveIndexByDirection(const UuidV4().generate(), WoxDirectionEnum.WOX_DIRECTION_RIGHT.code);
+  }
+
+  bool isInGridMode() {
+    return isGridLayout.value == true;
   }
 
   void onResultItemActivated(String traceId, WoxListItem<WoxQueryResult> item) {
     currentPreview.value = item.data.preview;
-    isShowPreviewPanel.value = currentPreview.value.previewData != "";
+    // Grid layout doesn't support preview panel
+    isShowPreviewPanel.value = !isInGridMode() && currentPreview.value.previewData != "";
 
     // update actions list
     var actions = item.data.actions.map((e) => WoxListItem.fromResultAction(e)).toList();
@@ -1299,8 +1440,22 @@ class WoxLauncherController extends GetxController {
     onQueryChanged(const UuidV4().generate(), woxChangeQuery, "user drop files");
   }
 
+  /// Update the plugin metadata based on the query
+  /// E.g. plugin icon, plugin features, etc.
+  Future<void> updatePluginMetadataOnQueryChanged(String traceId, PlainQuery query) async {
+    var queryMetadata = QueryMetadata(icon: WoxImage.empty(), resultPreviewWidthRatio: 0.5, isGridLayout: false, gridLayoutParams: GridLayoutParams.empty());
+    if (!query.isEmpty && query.queryText.contains(" ")) {
+      // if there is space in the query, then this  may be a plugin query, fetch metadata
+      queryMetadata = await WoxApi.instance.getQueryMetadata(query);
+    }
+
+    updateQueryIconOnQueryChanged(traceId, query, queryMetadata);
+    updateResultPreviewWidthRatioOnQueryChanged(traceId, query, queryMetadata);
+    updateGridLayoutParamsOnQueryChanged(traceId, query, queryMetadata);
+  }
+
   /// Change the query icon based on the query
-  Future<void> updateQueryIconOnQueryChanged(String traceId, PlainQuery query) async {
+  Future<void> updateQueryIconOnQueryChanged(String traceId, PlainQuery query, QueryMetadata queryMetadata) async {
     if (query.queryType == WoxQueryTypeEnum.WOX_QUERY_TYPE_SELECTION.code) {
       if (query.querySelection.type == WoxSelectionTypeEnum.WOX_SELECTION_TYPE_FILE.code) {
         queryIcon.value = QueryIconInfo(
@@ -1322,8 +1477,7 @@ class WoxLauncherController extends GetxController {
         return;
       }
 
-      var img = await WoxApi.instance.getQueryIcon(query);
-      queryIcon.value = QueryIconInfo(icon: img);
+      queryIcon.value = QueryIconInfo(icon: queryMetadata.icon);
       return;
     }
 
@@ -1331,7 +1485,7 @@ class WoxLauncherController extends GetxController {
   }
 
   /// Update the result preview width ratio based on the query
-  Future<void> updateResultPreviewWidthRatioOnQueryChanged(String traceId, PlainQuery query) async {
+  Future<void> updateResultPreviewWidthRatioOnQueryChanged(String traceId, PlainQuery query, QueryMetadata queryMetadata) async {
     if (query.isEmpty) {
       resultPreviewRatio.value = 0.5;
       return;
@@ -1342,9 +1496,33 @@ class WoxLauncherController extends GetxController {
       return;
     }
 
-    var resultPreviewWidthRatio = await WoxApi.instance.getResultPreviewWidthRatio(query);
-    Logger.instance.debug(traceId, "update result preview width ratio: $resultPreviewWidthRatio");
-    resultPreviewRatio.value = resultPreviewWidthRatio;
+    Logger.instance.debug(traceId, "update result preview width ratio: ${queryMetadata.resultPreviewWidthRatio}");
+    resultPreviewRatio.value = queryMetadata.resultPreviewWidthRatio;
+  }
+
+  Future<void> updateGridLayoutParamsOnQueryChanged(String traceId, PlainQuery query, QueryMetadata queryMetadata) async {
+    if (query.isEmpty) {
+      isGridLayout.value = false;
+      gridLayoutParams.value = GridLayoutParams.empty();
+      return;
+    }
+    // if there is no space in the query, then this must be a global query
+    if (!query.queryText.contains(" ")) {
+      isGridLayout.value = false;
+      gridLayoutParams.value = GridLayoutParams.empty();
+      return;
+    }
+
+    if (queryMetadata.isGridLayout) {
+      isGridLayout.value = true;
+      gridLayoutParams.value = queryMetadata.gridLayoutParams;
+    } else {
+      isGridLayout.value = false;
+      gridLayoutParams.value = GridLayoutParams.empty();
+    }
+    resultGridViewController.updateGridParams(gridLayoutParams.value);
+
+    Logger.instance.debug(traceId, "update grid layout params: columns=${queryMetadata.gridLayoutParams.columns}");
   }
 
   // Quick select related methods
@@ -1360,7 +1538,7 @@ class WoxLauncherController extends GetxController {
 
   /// Start the quick select timer when modifier key is pressed
   void startQuickSelectTimer(String traceId) {
-    if (isQuickSelectMode.value || resultListViewController.items.isEmpty) {
+    if (isQuickSelectMode.value || activeResultViewController.items.isEmpty) {
       return;
     }
 
@@ -1403,7 +1581,7 @@ class WoxLauncherController extends GetxController {
 
   /// Update quick select numbers for all result items
   void updateQuickSelectNumbers(String traceId) {
-    var items = resultListViewController.items;
+    var items = activeResultViewController.items;
 
     // Get visible range
     var visibleRange = _getVisibleItemRange();
@@ -1434,23 +1612,24 @@ class WoxLauncherController extends GetxController {
 
   /// Get the range of visible items in the result list
   Map<String, int> _getVisibleItemRange() {
-    if (!resultListViewController.scrollController.hasClients || resultListViewController.items.isEmpty) {
-      return {'start': 0, 'end': resultListViewController.items.length - 1};
+    final controller = activeResultViewController;
+    if (!controller.scrollController.hasClients || controller.items.isEmpty) {
+      return {'start': 0, 'end': controller.items.length - 1};
     }
 
     final itemHeight = WoxThemeUtil.instance.getResultItemHeight();
-    final currentOffset = resultListViewController.scrollController.offset;
-    final viewportHeight = resultListViewController.scrollController.position.viewportDimension;
+    final currentOffset = controller.scrollController.offset;
+    final viewportHeight = controller.scrollController.position.viewportDimension;
 
     if (viewportHeight <= 0) {
-      return {'start': 0, 'end': resultListViewController.items.length - 1};
+      return {'start': 0, 'end': controller.items.length - 1};
     }
 
     final firstVisibleItemIndex = (currentOffset / itemHeight).floor();
     final visibleItemCount = (viewportHeight / itemHeight).ceil();
-    final lastVisibleItemIndex = (firstVisibleItemIndex + visibleItemCount - 1).clamp(0, resultListViewController.items.length - 1);
+    final lastVisibleItemIndex = (firstVisibleItemIndex + visibleItemCount - 1).clamp(0, controller.items.length - 1);
 
-    return {'start': firstVisibleItemIndex.clamp(0, resultListViewController.items.length - 1), 'end': lastVisibleItemIndex};
+    return {'start': firstVisibleItemIndex.clamp(0, controller.items.length - 1), 'end': lastVisibleItemIndex};
   }
 
   /// Handle number key press in quick select mode
@@ -1459,7 +1638,7 @@ class WoxLauncherController extends GetxController {
       return false;
     }
 
-    var items = resultListViewController.items;
+    var items = activeResultViewController.items;
 
     // Get visible range
     var visibleRange = _getVisibleItemRange();
@@ -1474,7 +1653,7 @@ class WoxLauncherController extends GetxController {
       if (!item.isGroup) {
         if (quickSelectNumber == number) {
           Logger.instance.debug(traceId, "Quick select: selecting item $number at index $i");
-          resultListViewController.updateActiveIndex(traceId, i);
+          activeResultViewController.updateActiveIndex(traceId, i);
           executeDefaultAction(traceId);
           return true;
         }

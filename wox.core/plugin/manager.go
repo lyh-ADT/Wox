@@ -868,7 +868,7 @@ func (m *Manager) getDefaultActions(ctx context.Context, pluginInstance *Instanc
 	if setting.GetSettingManager().IsPinedResult(ctx, pluginInstance.Metadata.Id, title, subTitle) {
 		defaultActions = append(defaultActions, QueryResultAction{
 			Name:                   "i18n:plugin_manager_unpin_in_query",
-			Icon:                   UnpinIcon,
+			Icon:                   common.UnpinIcon,
 			IsSystemAction:         true,
 			PreventHideAfterAction: true,
 			Action:                 removeFromFavoriteAction,
@@ -876,7 +876,7 @@ func (m *Manager) getDefaultActions(ctx context.Context, pluginInstance *Instanc
 	} else {
 		defaultActions = append(defaultActions, QueryResultAction{
 			Name:                   "i18n:plugin_manager_pin_in_query",
-			Icon:                   PinIcon,
+			Icon:                   common.PinIcon,
 			IsSystemAction:         true,
 			PreventHideAfterAction: true,
 			Action:                 addToFavoriteAction,
@@ -965,10 +965,16 @@ func (m *Manager) PolishResult(ctx context.Context, pluginInstance *Instance, qu
 		}
 		if result.Actions[actionIndex].Icon.IsEmpty() {
 			// set default action icon if not present
-			result.Actions[actionIndex].Icon = DefaultActionIcon
+			result.Actions[actionIndex].Icon = common.ExecuteRunIcon
+		}
+		if result.Actions[actionIndex].Type == "" {
+			if len(result.Actions[actionIndex].Form) > 0 || result.Actions[actionIndex].OnSubmit != nil {
+				result.Actions[actionIndex].Type = QueryResultActionTypeForm
+			} else {
+				result.Actions[actionIndex].Type = QueryResultActionTypeExecute
+			}
 		}
 	}
-
 	// convert icon
 	result.Icon = common.ConvertIcon(ctx, result.Icon, pluginInstance.PluginDirectory)
 	for i := range result.Tails {
@@ -1016,19 +1022,30 @@ func (m *Manager) PolishResult(ctx context.Context, pluginInstance *Instance, qu
 	// translate action names
 	for actionIndex := range result.Actions {
 		result.Actions[actionIndex].Name = m.translatePlugin(ctx, pluginInstance, result.Actions[actionIndex].Name)
+		if result.Actions[actionIndex].Type == QueryResultActionTypeForm {
+			for definitionIndex := range result.Actions[actionIndex].Form {
+				if result.Actions[actionIndex].Form[definitionIndex].Value != nil {
+					result.Actions[actionIndex].Form[definitionIndex].Value = result.Actions[actionIndex].Form[definitionIndex].Value.Translate(pluginInstance.API.GetTranslation)
+				}
+			}
+		}
 	}
 	// translate preview data if preview type is text
 	if result.Preview.PreviewType == WoxPreviewTypeText || result.Preview.PreviewType == WoxPreviewTypeMarkdown {
 		result.Preview.PreviewData = m.translatePlugin(ctx, pluginInstance, result.Preview.PreviewData)
 	}
+	// translate group name
+	result.Group = m.translatePlugin(ctx, pluginInstance, result.Group)
 
 	// set first action as default if no default action is set
 	defaultActionCount := lo.CountBy(result.Actions, func(item QueryResultAction) bool {
 		return item.IsDefault
 	})
-	if defaultActionCount == 0 && len(result.Actions) > 0 {
-		result.Actions[0].IsDefault = true
-		result.Actions[0].Hotkey = "Enter"
+	if defaultActionCount == 0 {
+		if len(result.Actions) > 0 {
+			result.Actions[0].IsDefault = true
+			result.Actions[0].Hotkey = "Enter"
+		}
 	}
 
 	//move default action to first one of the actions
@@ -1095,7 +1112,7 @@ func (m *Manager) PolishResult(ctx context.Context, pluginInstance *Instance, qu
 		if !hasFavoriteTail {
 			result.Tails = append(result.Tails, QueryResultTail{
 				Type:         QueryResultTailTypeImage,
-				Image:        PinIcon,
+				Image:        common.PinIcon,
 				ContextData:  favoriteTailContextData, // Use ContextData to identify favorite tail
 				IsSystemTail: true,                    // Mark as system tail so it will be filtered out in GetUpdatableResult
 			})
@@ -1133,7 +1150,14 @@ func (m *Manager) PolishUpdatableResult(ctx context.Context, pluginInstance *Ins
 				actions[actionIndex].Id = uuid.NewString()
 			}
 			if actions[actionIndex].Icon.IsEmpty() {
-				actions[actionIndex].Icon = DefaultActionIcon
+				actions[actionIndex].Icon = common.ExecuteRunIcon
+			}
+			if actions[actionIndex].Type == "" {
+				if len(actions[actionIndex].Form) > 0 || actions[actionIndex].OnSubmit != nil {
+					actions[actionIndex].Type = QueryResultActionTypeForm
+				} else {
+					actions[actionIndex].Type = QueryResultActionTypeExecute
+				}
 			}
 		}
 
@@ -1144,8 +1168,15 @@ func (m *Manager) PolishUpdatableResult(ctx context.Context, pluginInstance *Ins
 			for actionIndex := range actions {
 				// Always create proxy callback for external plugins
 				// because the Action field is not serialized and will be nil
-				if actions[actionIndex].Action == nil {
+				if actions[actionIndex].Type == QueryResultActionTypeExecute && actions[actionIndex].Action == nil {
 					actions[actionIndex].Action = proxyCreator.CreateActionProxy(actions[actionIndex].Id)
+				}
+			}
+		}
+		if proxyCreator, ok := pluginInstance.Plugin.(FormActionProxyCreator); ok {
+			for actionIndex := range actions {
+				if actions[actionIndex].Type == QueryResultActionTypeForm && actions[actionIndex].OnSubmit == nil {
+					actions[actionIndex].OnSubmit = proxyCreator.CreateFormActionProxy(actions[actionIndex].Id)
 				}
 			}
 		}
@@ -1181,6 +1212,13 @@ func (m *Manager) PolishUpdatableResult(ctx context.Context, pluginInstance *Ins
 		// Translate action names
 		for actionIndex := range actions {
 			actions[actionIndex].Name = m.translatePlugin(ctx, pluginInstance, actions[actionIndex].Name)
+			if actions[actionIndex].Type == QueryResultActionTypeForm {
+				for definitionIndex := range actions[actionIndex].Form {
+					if actions[actionIndex].Form[definitionIndex].Value != nil {
+						actions[actionIndex].Form[definitionIndex].Value = actions[actionIndex].Form[definitionIndex].Value.Translate(pluginInstance.API.GetTranslation)
+					}
+				}
+			}
 		}
 
 		result.Actions = &actions
@@ -1199,8 +1237,13 @@ func (m *Manager) PolishUpdatableResult(ctx context.Context, pluginInstance *Ins
 			}
 
 			// If action callback is nil in the new action but exists in cache, preserve it
-			if actions[i].Action == nil && cachedAction != nil && cachedAction.Action != nil {
-				actions[i].Action = cachedAction.Action
+			if cachedAction != nil {
+				if actions[i].Action == nil && cachedAction.Action != nil {
+					actions[i].Action = cachedAction.Action
+				}
+				if actions[i].Type == QueryResultActionTypeForm && actions[i].OnSubmit == nil && cachedAction.OnSubmit != nil {
+					actions[i].OnSubmit = cachedAction.OnSubmit
+				}
 			}
 		}
 
@@ -1252,7 +1295,7 @@ func (m *Manager) PolishUpdatableResult(ctx context.Context, pluginInstance *Ins
 			if !hasFavoriteTail {
 				tails = append(tails, QueryResultTail{
 					Type:         QueryResultTailTypeImage,
-					Image:        PinIcon,
+					Image:        common.PinIcon,
 					ContextData:  favoriteTailContextData, // Use ContextData to identify favorite tail
 					IsSystemTail: true,                    // Mark as system tail so it will be filtered out in GetUpdatableResult
 				})
@@ -1492,8 +1535,8 @@ func (m *Manager) translatePlugin(ctx context.Context, pluginInstance *Instance,
 	if pluginInstance.IsSystemPlugin {
 		return i18n.GetI18nManager().TranslateWox(ctx, key)
 	} else {
-		// Try plugin translation first
-		translated := i18n.GetI18nManager().TranslatePlugin(ctx, key, pluginInstance.PluginDirectory)
+		// Try plugin translation first (with inline i18n from plugin.json)
+		translated := i18n.GetI18nManager().TranslatePlugin(ctx, key, pluginInstance.PluginDirectory, pluginInstance.Metadata.I18n)
 		// If translation failed, fallback to system translation
 		// This handles cases where third-party plugins have system actions (like "Pin to current query")
 		if key == translated {
@@ -1555,12 +1598,12 @@ func (m *Manager) getActiveBrowserUrl(ctx context.Context) string {
 }
 
 func (m *Manager) getActiveFileExplorerPath(ctx context.Context) string {
-	// Only implemented for Windows currently
-	if runtime.GOOS != "windows" {
+	// Supported on Windows (File Explorer) and macOS (Finder)
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		return ""
 	}
 
-	// Use native COM via util/window for fast retrieval
+	// Use platform-specific implementation via util/window
 	return window.GetActiveFileExplorerPath()
 }
 
@@ -1630,6 +1673,43 @@ func (m *Manager) ExecuteAction(ctx context.Context, resultId string, actionId s
 		ResultId:       resultId,
 		ResultActionId: actionId,
 		ContextData:    resultCache.Result.ContextData,
+	})
+
+	util.Go(ctx, fmt.Sprintf("[%s] post execute action", resultCache.PluginInstance.Metadata.Name), func() {
+		m.postExecuteAction(ctx, resultCache)
+	})
+
+	return nil
+}
+
+func (m *Manager) SubmitFormAction(ctx context.Context, resultId string, actionId string, values map[string]string) error {
+	resultCache, found := m.resultCache.Load(resultId)
+	if !found {
+		return fmt.Errorf("result cache not found for result id (submit form action): %s", resultId)
+	}
+
+	var actionCache *QueryResultAction
+	for i := range resultCache.Result.Actions {
+		if resultCache.Result.Actions[i].Id == actionId && resultCache.Result.Actions[i].Type == QueryResultActionTypeForm {
+			actionCache = &resultCache.Result.Actions[i]
+			break
+		}
+	}
+	if actionCache == nil {
+		return fmt.Errorf("form action not found for result id: %s, action id: %s", resultId, actionId)
+	}
+
+	if actionCache.OnSubmit == nil {
+		return fmt.Errorf("form action callback is nil for result id: %s, action id: %s", resultId, actionId)
+	}
+
+	actionCache.OnSubmit(ctx, FormActionContext{
+		ActionContext: ActionContext{
+			ResultId:       resultId,
+			ResultActionId: actionId,
+			ContextData:    resultCache.Result.ContextData,
+		},
+		Values: values,
 	})
 
 	util.Go(ctx, fmt.Sprintf("[%s] post execute action", resultCache.PluginInstance.Metadata.Name), func() {
@@ -1839,7 +1919,7 @@ func (m *Manager) QueryMRU(ctx context.Context) []QueryResultUI {
 			removeMRUAction := QueryResultAction{
 				Id:   uuid.NewString(),
 				Name: i18n.GetI18nManager().TranslateWox(ctx, "mru_remove_action"),
-				Icon: common.NewWoxImageEmoji("🗑️"),
+				Icon: common.TrashIcon,
 				Action: func(ctx context.Context, actionContext ActionContext) {
 					err := setting.GetSettingManager().RemoveMRUItem(ctx, item.PluginID, item.Title, item.SubTitle)
 					if err != nil {
